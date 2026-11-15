@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.db-wal
+*.db-shm
+*.jsonl
+.mcp-cage/
+.mcp-cage-state/
+.DS_Store
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/

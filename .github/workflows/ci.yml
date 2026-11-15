@@ -1,0 +1,31 @@
+name: CI — mcp-cage Security & Wire Firewall Suite
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} (Zero-Dependency Stdlib Verification)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run V2.2 Unit & Dual-Plane Security Suite (test_mcp_cage_v21.py)
+        run: python3 test_mcp_cage_v21.py -v
+
+      - name: Run Interactive 5-Act Verification Demo (demo_interactive.py)
+        run: python3 demo_interactive.py

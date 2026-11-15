@@ -1,0 +1,2271 @@
+"""
+Core engine for `mcp-cage` (Zero-Code Wire & Native-Hook Security Firewall) & `mcp-sploit` (Toxic-Flow & Config Scanner).
+
+V2.2 / V3 Unified Architecture:
+1. Cross-Process SQLite-Backed `BidirectionalSecretScrubber`:
+   - Stores redacted secret tokens (`<MCP_REDACTED_...>`) in SQLite WAL so separate OS processes
+     (`filesystem` vs `slack` vs `github`) share the same token vault without collisions or amnesia.
+   - Detects 11+ secret classes (OpenAI, Anthropic, GitHub, AWS, Slack, Stripe, PEM keys,
+     DB connection URIs, JWTs, JSON/YAML secrets, and .env assignments).
+2. Atomic SQLite Transactions (`BEGIN IMMEDIATE`) in `SessionTaintStateMachine`:
+   - Eliminates TOCTOU lost-update race conditions during parallel LLM tool calls.
+   - Enforces MELON provenance attribution (blocking sink/mutator arguments derived from untrusted entities).
+   - Supports turn integrity resets (`reset_turn_integrity`), context endorsement (`endorse_session`),
+     and scoped 5-minute workspace edit leases (`DeclassificationAction.LEASE_MUTATOR_5M`).
+3. SSRF, Cloud Metadata (`169.254.169.254`) & High-Entropy DNS Exfiltration Guard:
+   - Deterministically blocks AWS/GCP/Alibaba/IPv6 cloud metadata endpoints, loopback/RFC1918 private IPs,
+     dangerous non-HTTP schemes (`file://`, `gopher://`, `dict://`, `ftp://`, `ldap://`), and high-entropy
+     or hex/base64-encoded DNS exfiltration subdomains (`<hex32>.attacker.com`).
+4. `CurXecute` / `MCPoison` Workspace Config Auditor (`WorkspaceMCPConfigAuditor`):
+   - Audits `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and `claude_desktop_config.json` for
+     relative-path binary execution, shell wrappers, command chaining, hardcoded plaintext secrets,
+     and unwrapped MCP servers.
+5. Universal Dual-Plane Enforcement:
+   - Plane A (MCP Wire Gateway): `MCPWireGateway` & `MCPJsonRpcProxy` for stdio MCP servers.
+   - Plane B (Native Agent Lifecycle Hooks): `mcp-cage hook <claude|cursor|gemini|agy|codex>` for built-in tools.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import ipaddress
+import json
+import math
+import re
+import sqlite3
+import sys
+import tempfile
+import time
+import urllib.parse
+import uuid
+from dataclasses import dataclass, field
+from enum import IntEnum, StrEnum
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+
+class Integrity(IntEnum):
+    UNTRUSTED = 0   # External web pages, external GitHub issues/PRs, incoming emails/Slack
+    ENDORSED = 1    # Explicitly human-declassified or trusted-teammate content
+    TRUSTED = 2     # Authenticated user prompt & pinned system configuration
+
+
+class Confidentiality(IntEnum):
+    PUBLIC = 0        # Public documentation, open web, README.md
+    INTERNAL = 1      # Internal workspace source code, non-sensitive config
+    CONFIDENTIAL = 2  # Customer DB rows, private repos, internal hostnames
+    SECRET = 3        # Raw credentials, .env files, SSH keys, API tokens, DB URIs
+
+
+class ToolRole(IntEnum):
+    NEUTRAL = 0
+    UNTRUSTED_SOURCE = 1     # Ingests external untrusted text (lowers session integrity)
+    PRIVATE_SOURCE = 2       # Ingests confidential/secret data (raises session confidentiality)
+    PRIVILEGED_MUTATOR = 3   # Mutates local/remote system state (bash, SQL write, git push)
+    EXTERNAL_EGRESS_SINK = 4 # Sends data outside trust boundary (Slack, email, HTTP, public PR)
+    WORKSPACE_MUTATOR = 5    # Scoped workspace source file edit (allowed when confined to safe paths)
+
+
+class GateDecisionType(IntEnum):
+    ALLOW = 0
+    STEP_UP = 1
+    DENY = 2
+
+
+class EnforcementMode(StrEnum):
+    SHADOW = "shadow"   # Audit-only mode: logs violations to audit.jsonl without blocking calls
+    ENFORCE = "enforce" # Active firewall mode: blocks DENY and triggers STEP_UP approval
+
+
+class DeclassificationAction(StrEnum):
+    DENY = "deny"
+    APPROVE_ONCE = "approve_once"
+    LEASE_MUTATOR_5M = "lease_mutator_5m"
+    ENDORSE_CONTEXT = "endorse_context"
+
+
+# Dynamic taint resolver signature: (arguments, response_text, had_redacted_secrets) -> (Integrity, Confidentiality)
+SourceTaintResolver = Callable[[Mapping[str, Any], str, bool], tuple[Integrity, Confidentiality]]
+
+
+@dataclass(frozen=True)
+class ToolSecurityProfile:
+    server: str
+    tool_name: str
+    roles: frozenset[ToolRole]
+    source_integrity: Integrity = Integrity.TRUSTED
+    source_confidentiality: Confidentiality = Confidentiality.PUBLIC
+    min_required_integrity: Integrity = Integrity.TRUSTED
+    max_allowed_confidentiality: Confidentiality = Confidentiality.PUBLIC
+    arg_guard: Callable[[Mapping[str, Any]], tuple[bool, str]] | None = None
+    source_taint_resolver: SourceTaintResolver | None = None
+
+    @property
+    def fq_name(self) -> str:
+        return f"{self.server}.{self.tool_name}"
+
+
+@dataclass
+class GateEvaluation:
+    decision: GateDecisionType
+    effective_decision: GateDecisionType  # In SHADOW mode, STEP_UP/DENY become ALLOW on wire but logged
+    mode: EnforcementMode
+    reason: str
+    human_summary: str
+    trifecta_triggered: bool = False
+    lease_applied: str | None = None
+    ambient_integrity: Integrity = Integrity.TRUSTED
+    ambient_confidentiality: Confidentiality = Confidentiality.PUBLIC
+    provenance_log: list[str] = field(default_factory=list)
+
+
+class StateTuple(tuple):  # type: ignore[type-arg]
+    """
+    Backward-compatible state tuple returned by `SessionTaintStateMachine.get_state()`.
+    Supports both 3-tuple unpacking `(integrity, confidentiality, provenance)` (V2.1 API)
+    and 4-tuple unpacking `(integrity, confidentiality, provenance, leases)` (V3 API).
+    """
+
+    def __new__(
+        cls,
+        integrity: Integrity,
+        confidentiality: Confidentiality,
+        provenance: list[str],
+        leases: dict[str, float],
+    ) -> StateTuple:
+        obj = super().__new__(cls, (integrity, confidentiality, provenance, leases))
+        return obj
+
+
+# -----------------------------------------------------------------------------
+# Built-in File, Path, SSRF & High-Entropy DNS Exfiltration Guards
+# -----------------------------------------------------------------------------
+
+SENSITIVE_FILE_PATTERNS = re.compile(
+    r"(?i)(^|/)\.env($|\.)|id_rsa|id_ed25519|\.pem$|\.key$|credentials|secrets?\.ya?ml|secrets?\.json|\.aws/|\.npmrc|\.pypirc|\.ssh/"
+)
+PUBLIC_DOC_PATTERNS = re.compile(r"(?i)(^|/)(readme|license|changelog|contributing)(\.[a-z0-9]+)?$")
+PROTECTED_DOTFILE_WRITE_PATTERNS = re.compile(
+    r"(?i)(^|/)(\.env($|\.)|\.git/|\.vscode/|\.cursor/|\.claude/|claude_desktop_config\.json|claude\.md|\.cursorrules|mcp-cage\.ya?ml|\.mcp-cage/|\.bashrc|\.zshrc|\.profile|\.ssh/|makefile|package\.json)"
+)
+
+
+def is_safe_workspace_path(raw_path: str | Path, workspace_root: Path, *, is_write: bool = True) -> tuple[bool, str]:
+    """
+    Verifies that `raw_path` resolves strictly inside `workspace_root` (blocking `../`, `~`,
+    and symlink escapes) and does not modify protected dotfiles or agent configuration files.
+    """
+    path_str = str(raw_path).strip()
+    if not path_str:
+        return False, "Missing file path parameter."
+    if path_str.startswith("~"):
+        return False, f"Home directory path expansion blocked (A4.2): '{path_str}'."
+
+    resolved_root = workspace_root.resolve()
+    p_obj = Path(path_str)
+    candidate = p_obj.resolve() if p_obj.is_absolute() else (workspace_root / p_obj).resolve()
+    try:
+        rel = candidate.relative_to(resolved_root)
+    except ValueError:
+        return (
+            False,
+            f"Path traversal / symlink escape blocked (A4.2): '{path_str}' resolves to '{candidate}' outside workspace '{resolved_root}'.",
+        )
+
+    rel_norm = str(rel).replace("\\", "/")
+    raw_norm = path_str.replace("\\", "/")
+    if is_write and (
+        PROTECTED_DOTFILE_WRITE_PATTERNS.search(raw_norm)
+        or PROTECTED_DOTFILE_WRITE_PATTERNS.search(rel_norm)
+    ):
+        return (
+            False,
+            f"Protected config/dotfile write blocked (A3.3/A3.4): '{path_str}' cannot be modified by an agent.",
+        )
+    return True, "OK"
+
+
+def make_workspace_path_guard(
+    workspace_root: Path, *, is_write: bool = True
+) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+    def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+        raw_path = str(args.get("path") or args.get("file_path") or args.get("target_file") or "")
+        return is_safe_workspace_path(raw_path, workspace_root, is_write=is_write)
+
+    return _guard
+
+
+# -----------------------------------------------------------------------------
+# Primitive A: SSRF, Cloud Metadata & High-Entropy DNS Exfiltration Guard
+# -----------------------------------------------------------------------------
+
+DANGEROUS_URI_SCHEMES = {"file", "gopher", "dict", "ftp", "tftp", "ldap", "ldaps", "jar", "netdoc"}
+
+CLOUD_METADATA_HOSTS = {
+    "169.254.169.254",
+    "169.254.170.2",
+    "fd00:ec2::254",
+    "metadata.google.internal",
+    "metadata.goog",
+    "100.100.100.200",  # Alibaba Cloud IMDS
+    "192.0.0.192",      # Oracle Cloud IMDS
+}
+
+LOOPBACK_HOSTNAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}
+
+URL_IN_TEXT_RE = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.\-]*://[^\s\"'<>`]+)"
+)
+DNS_CMD_HOST_RE = re.compile(
+    r"(?i)\b(?:nslookup|dig|host|ping|curl|wget|nc|ncat|netcat)\s+(?:-[a-zA-Z0-9]+\s+)*([a-z0-9_.\-]+\.[a-z]{2,63})\b"
+)
+HEX_EXFIL_LABEL_RE = re.compile(r"^[0-9a-fA-F]{24,}$")
+BASE64_EXFIL_LABEL_RE = re.compile(r"^[A-Za-z0-9_\-]{28,}$")
+
+
+def shannon_entropy(text: str) -> float:
+    """Computes Shannon entropy (in bits per character) for DNS exfiltration detection."""
+    if not text:
+        return 0.0
+    length = len(text)
+    counts: dict[str, int] = {}
+    for ch in text:
+        counts[ch] = counts.get(ch, 0) + 1
+    return -sum((c / length) * math.log2(c / length) for c in counts.values())
+
+
+def _is_high_entropy_exfil_subdomain(hostname: str) -> tuple[bool, str]:
+    """
+    Detects high-entropy or hex/base64-encoded DNS exfiltration subdomains
+    (e.g., `4f6a8b9c0d1e2f3a4b5c6d7e8f9a0b1c.attacker.com` or high-entropy base64 labels).
+    """
+    clean_host = hostname.strip(".").lower()
+    labels = [lbl for lbl in clean_host.split(".") if lbl]
+    if len(labels) < 3:
+        return False, "OK"
+
+    # Inspect subdomain labels (excluding the registrable domain + TLD `example.com`)
+    subdomain_labels = labels[:-2]
+    raw_labels = hostname.strip(".").split(".")[:-2]
+
+    for sub_low, sub_raw in zip(subdomain_labels, raw_labels):
+        if HEX_EXFIL_LABEL_RE.match(sub_low):
+            return (
+                True,
+                f"Hex-encoded DNS exfiltration subdomain blocked: label '{sub_raw}' ({len(sub_raw)} hex chars) in '{hostname}'.",
+            )
+        ent = shannon_entropy(sub_raw)
+        if len(sub_raw) > 28 and ent > 3.9:
+            return (
+                True,
+                f"High-entropy DNS exfiltration subdomain blocked: label '{sub_raw}' (len={len(sub_raw)}, entropy={ent:.2f} bits/char > 3.9) in '{hostname}'.",
+            )
+        has_digit = any(c.isdigit() for c in sub_raw)
+        has_alpha = any(c.isalpha() for c in sub_raw)
+        if len(sub_raw) >= 30 and has_digit and has_alpha and BASE64_EXFIL_LABEL_RE.match(sub_raw) and ent > 3.7:
+            return (
+                True,
+                f"Encoded secret DNS exfiltration subdomain blocked: label '{sub_raw}' (len={len(sub_raw)}, entropy={ent:.2f}) in '{hostname}'.",
+            )
+    return False, "OK"
+
+
+def _validate_single_host_or_ip(
+    raw_host: str, *, allow_private_hosts: set[str] | None = None
+) -> tuple[bool, str]:
+    host = raw_host.strip().strip("[]").lower()
+    if not host:
+        return True, "OK"
+    allowed = {h.lower().strip("[]") for h in (allow_private_hosts or set())}
+    if host in allowed:
+        return True, "OK"
+
+    if host in CLOUD_METADATA_HOSTS or host.endswith(".metadata.google.internal"):
+        return False, f"SSRF to cloud metadata endpoint blocked (A4.4): '{raw_host}'."
+
+    if host in LOOPBACK_HOSTNAMES or host.endswith(".localhost"):
+        return False, f"SSRF to loopback hostname blocked (A4.4): '{raw_host}'."
+
+    # Check IP address (including IPv4, IPv6, IPv6-mapped IPv4, link-local, loopback, RFC1918)
+    try:
+        ip_obj = ipaddress.ip_address(host)
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped is not None:
+            ip_obj = ip_obj.ipv4_mapped
+        if str(ip_obj) in CLOUD_METADATA_HOSTS or ip_obj.is_link_local:
+            return False, f"SSRF to cloud metadata / link-local IP blocked (A4.4): '{raw_host}' ({ip_obj})."
+        if ip_obj.is_loopback or ip_obj.is_unspecified:
+            return False, f"SSRF to loopback/unspecified IP blocked (A4.4): '{raw_host}' ({ip_obj})."
+        if ip_obj.is_private or ip_obj.is_reserved or ip_obj.is_multicast:
+            return False, f"SSRF to RFC1918 private/internal IP blocked (A4.4): '{raw_host}' ({ip_obj})."
+        return True, "OK"
+    except ValueError:
+        pass
+
+    # Check DNS exfiltration entropy on hostname labels
+    is_exfil, reason = _is_high_entropy_exfil_subdomain(raw_host)
+    if is_exfil:
+        return False, reason
+
+    return True, "OK"
+
+
+def validate_outbound_network_target(
+    text_or_url: str, *, allow_private_hosts: set[str] | None = None
+) -> tuple[bool, str]:
+    """
+    Primitive A: Validates any URL or command string against:
+    1. Cloud metadata & link-local endpoints (`169.254.169.254`, `169.254.170.2`, `fd00:ec2::254`,
+       `metadata.google.internal`, `100.100.100.200`).
+    2. Loopback & RFC 1918 private IP ranges (`127.0.0.0/8`, `localhost`, `0.0.0.0`, `[::1]`,
+       `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) unless explicitly allowlisted.
+    3. Dangerous non-HTTP schemes (`file://`, `gopher://`, `dict://`, `ftp://`, `ldap://`).
+    4. High-entropy DNS exfiltration subdomains (label > 28 chars with Shannon entropy > 3.9 or hex/base64 exfil).
+    """
+    raw = text_or_url.strip()
+    if not raw:
+        return True, "OK"
+
+    # Extract all URI candidates in the string
+    uri_candidates = URL_IN_TEXT_RE.findall(raw)
+    if not uri_candidates and "://" in raw:
+        uri_candidates = [raw]
+
+    for candidate in uri_candidates:
+        try:
+            parsed = urllib.parse.urlsplit(candidate)
+        except Exception:
+            return False, f"Malformed outbound URL blocked: '{candidate}'."
+
+        scheme = (parsed.scheme or "").lower()
+        if scheme in DANGEROUS_URI_SCHEMES:
+            return (
+                False,
+                f"Dangerous non-HTTP URI scheme '{scheme}://' blocked (A4.4): '{candidate}'.",
+            )
+        if scheme in {"http", "https", "ws", "wss"}:
+            hostname = parsed.hostname or ""
+            # Preserve original case for entropy calculation by extracting host from netloc
+            netloc_host = parsed.netloc.split("@")[-1]
+            if netloc_host.startswith("["):
+                netloc_host = netloc_host.split("]")[0] + "]"
+            else:
+                netloc_host = netloc_host.split(":")[0]
+            ok, reason = _validate_single_host_or_ip(
+                netloc_host or hostname, allow_private_hosts=allow_private_hosts
+            )
+            if not ok:
+                return False, reason
+
+    # Also inspect raw command strings for DNS/network utilities (`nslookup <hex>.attacker.com`, `dig`, `ping`, `curl`)
+    for match in DNS_CMD_HOST_RE.finditer(raw):
+        host_token = match.group(1)
+        ok, reason = _validate_single_host_or_ip(host_token, allow_private_hosts=allow_private_hosts)
+        if not ok:
+            return False, reason
+
+    # If the string itself looks like a bare hostname with 3+ labels, check DNS exfiltration
+    if " " not in raw and "://" not in raw and "/" not in raw and raw.count(".") >= 2:
+        ok, reason = _validate_single_host_or_ip(raw, allow_private_hosts=allow_private_hosts)
+        if not ok:
+            return False, reason
+
+    return True, "OK"
+
+
+def make_ssrf_and_dns_guard(
+    allow_private_hosts: set[str] | None = None,
+) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+    """Returns an `arg_guard` callable that checks all string parameters for SSRF & DNS exfiltration."""
+
+    def _scan_value(val: Any) -> tuple[bool, str]:
+        if isinstance(val, str):
+            return validate_outbound_network_target(val, allow_private_hosts=allow_private_hosts)
+        if isinstance(val, Mapping):
+            for v in val.values():
+                ok, reason = _scan_value(v)
+                if not ok:
+                    return False, reason
+        elif isinstance(val, (list, tuple)):
+            for item in val:
+                ok, reason = _scan_value(item)
+                if not ok:
+                    return False, reason
+        return True, "OK"
+
+    def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+        return _scan_value(args)
+
+    return _guard
+
+
+class WirePayloadSanitizer:
+    """
+    Sanitizes untrusted wire text against:
+    - A1.4: Invisible Unicode Tag characters (U+E0000..U+E007F), zero-width joiners, and RTL overrides (U+202A..U+202E).
+    - A2.7: Terminal ANSI CSI escape codes (`\\x1b[...`) and OSC 52 clipboard injection sequences (`\\x1b]...`).
+    """
+
+    UNICODE_SMUGGLING_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\U000e0000-\U000e007f]+")
+    ANSI_ESCAPE_RE = re.compile(
+        r"(?:\x1b|\\u001b)(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b\\]*(?:\x07|\\u0007|\x1b\\|\\u001b\\\\))"
+    )
+    SPOOFED_BOUNDARY_RE = re.compile(r"<<<\s*/?\s*UNTRUSTED_DATA_BOUNDARY[^>]*>>>")
+
+    @classmethod
+    def sanitize_text(cls, text: str) -> tuple[str, list[str]]:
+        alerts: list[str] = []
+        cleaned = text
+        if cls.UNICODE_SMUGGLING_RE.search(cleaned):
+            alerts.append("Stripped invisible Unicode Tag / bidirectional smuggling characters (A1.4).")
+            cleaned = cls.UNICODE_SMUGGLING_RE.sub("", cleaned)
+        if cls.ANSI_ESCAPE_RE.search(cleaned):
+            alerts.append("Stripped terminal ANSI / OSC clipboard escape sequences (A2.7).")
+            cleaned = cls.ANSI_ESCAPE_RE.sub("", cleaned)
+        return cleaned, alerts
+
+    @classmethod
+    def spotlight_untrusted_text(cls, text: str) -> str:
+        """
+        Wraps untrusted tool output in a randomized Microsoft Spotlighting boundary
+        (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) after neutralizing any spoofed boundary markers.
+        """
+        cleaned, _ = cls.sanitize_text(text)
+        de_spoofed = cls.SPOOFED_BOUNDARY_RE.sub("[SPOOFED_BOUNDARY_STRIPPED]", cleaned)
+        boundary_id = uuid.uuid4().hex[:8]
+        return (
+            f"<<<UNTRUSTED_DATA_BOUNDARY id={boundary_id}>>>\n"
+            f"{de_spoofed}\n"
+            f"<<<END_UNTRUSTED_DATA_BOUNDARY id={boundary_id}>>>"
+        )
+
+
+class StandardArgGuards:
+    """
+    Built-in deterministic parameter guards (`arg_guard`) for Planes 3, 4, and 8:
+    - A3.3 / A3.4: Blocks writes to `.git/hooks/`, `.vscode/settings.json` (Copilot YOLO mode), `.cursor/mcp.json` (CurXecute).
+    - A4.1: Blocks shell metacharacters (`;`, `|`, `&&`, `$()`, backticks) on non-shell parameters.
+    - A4.2: Resolves symlinks (`Path.resolve()`) and blocks path traversal outside `workspace_root`.
+    - A4.3 / A8.1: Blocks destructive SQL keywords (`DROP`, `DELETE`, `TRUNCATE`, `ALTER`, `COPY`, `pg_read_file`).
+    - A4.4: Blocks SSRF requests to cloud metadata (`169.254.169.254`), localhost (`127.0.0.1`), RFC1918 IPs,
+      dangerous URI schemes (`file://`, `gopher://`), and high-entropy DNS exfiltration subdomains.
+    - A8.2: Enforces financial transaction / refund dollar caps.
+    """
+
+    SHELL_METACHAR_RE = re.compile(r"[;|&`$><]|\$\(")
+    DESTRUCTIVE_SQL_RE = re.compile(
+        r"(?i)\b(DROP|DELETE|TRUNCATE|ALTER|GRANT|COPY|pg_read_file|lo_import|lo_export|dblink)\b"
+    )
+
+    @classmethod
+    def make_workspace_file_guard(
+        cls, workspace_root: Path, *, is_write: bool
+    ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+        return make_workspace_path_guard(workspace_root, is_write=is_write)
+
+    @classmethod
+    def shell_metachar_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        for k, v in args.items():
+            if isinstance(v, str) and cls.SHELL_METACHAR_RE.search(v):
+                return False, f"Shell metacharacter injection blocked in parameter '{k}' (A4.1)."
+        return True, "OK"
+
+    @classmethod
+    def sql_safety_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        sql = str(args.get("sql", "") or args.get("query", ""))
+        match = cls.DESTRUCTIVE_SQL_RE.search(sql)
+        if match:
+            return False, f"Forbidden SQL keyword/function '{match.group(1)}' blocked (A4.3/A8.1)."
+        if ";" in sql.strip().rstrip(";"):
+            return False, "Stacked multi-statement SQL query blocked (A4.3)."
+        return True, "OK"
+
+    @classmethod
+    def ssrf_url_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        return make_ssrf_and_dns_guard()(args)
+
+    @classmethod
+    def make_financial_cap_guard(cls, max_amount_usd: float) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+        def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+            amt = float(args.get("amount", args.get("amount_usd", 0.0)))
+            if amt > max_amount_usd:
+                return (
+                    False,
+                    f"Autonomous financial transaction (${amt:.2f}) exceeds safety cap (${max_amount_usd:.2f}) (A8.2).",
+                )
+            return True, "OK"
+
+        return _guard
+
+
+def filesystem_read_taint_resolver(
+    args: Mapping[str, Any], response_text: str, had_redacted_secrets: bool
+) -> tuple[Integrity, Confidentiality]:
+    """
+    Distinguishes reading `README.md` (PUBLIC) vs `src/app.py` (INTERNAL) vs `.env` (SECRET).
+    """
+    path_str = str(args.get("path") or args.get("file_path") or "")
+    if had_redacted_secrets or SENSITIVE_FILE_PATTERNS.search(path_str):
+        return Integrity.TRUSTED, Confidentiality.SECRET
+    if PUBLIC_DOC_PATTERNS.search(path_str):
+        return Integrity.TRUSTED, Confidentiality.PUBLIC
+    return Integrity.TRUSTED, Confidentiality.INTERNAL
+
+
+def github_issue_taint_resolver(
+    args: Mapping[str, Any], response_text: str, had_redacted_secrets: bool
+) -> tuple[Integrity, Confidentiality]:
+    """
+    Distinguishes issues authored by trusted repo owners/members vs untrusted external internet users.
+    """
+    author_role = str(args.get("author_association", "NONE")).upper()
+    conf = Confidentiality.SECRET if had_redacted_secrets else Confidentiality.PUBLIC
+    if author_role in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        return Integrity.ENDORSED, conf
+    return Integrity.UNTRUSTED, conf
+
+
+# -----------------------------------------------------------------------------
+# Primitive 1: Atomic, Cross-Process `SessionTaintStateMachine` with MELON & Leases
+# -----------------------------------------------------------------------------
+
+UNTRUSTED_ENTITY_URL_RE = re.compile(r"https?://[^\s\"'<>`)]+")
+UNTRUSTED_ENTITY_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24}\b")
+
+
+class SessionTaintStateMachine:
+    """
+    Cross-process, monotonic ambient context taint tracker backed by SQLite WAL.
+    Features:
+    - Uses `BEGIN IMMEDIATE` transactions + atomic SQL `MIN`/`MAX` to prevent parallel lost-update races.
+    - Tracks untrusted URLs/domains/emails (MELON provenance attribution) to block target hijacking.
+    - Automatically runs `make_ssrf_and_dns_guard()` on all `EXTERNAL_EGRESS_SINK` tool calls.
+    - Supports dynamic argument/content taint resolvers, scoped 5-minute workspace leases,
+      context endorsement (`endorse_session`), and turn integrity resets (`reset_turn_integrity`).
+    """
+
+    def __init__(
+        self,
+        db_path: Path,
+        session_id: str,
+        mode: EnforcementMode = EnforcementMode.ENFORCE,
+        audit_log_path: Path | None = None,
+    ) -> None:
+        self.db_path = db_path
+        self.session_id = session_id
+        self.mode = mode
+        self.audit_log_path = audit_log_path or (db_path.parent / "audit.jsonl")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=15.0, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=15000;")
+        return conn
+
+    def _init_db(self) -> None:
+        for attempt in range(10):
+            conn = self._connect()
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("BEGIN IMMEDIATE;")
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS session_taint (
+                        session_id TEXT PRIMARY KEY,
+                        integrity INTEGER NOT NULL,
+                        confidentiality INTEGER NOT NULL,
+                        provenance_json TEXT NOT NULL,
+                        leases_json TEXT NOT NULL DEFAULT '{}',
+                        untrusted_entities_json TEXT NOT NULL DEFAULT '[]',
+                        updated_at REAL NOT NULL
+                    )
+                    """
+                )
+                # Ensure column exists if table was created by an older schema
+                cols = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(session_taint);").fetchall()
+                }
+                if "untrusted_entities_json" not in cols:
+                    conn.execute(
+                        "ALTER TABLE session_taint ADD COLUMN untrusted_entities_json TEXT NOT NULL DEFAULT '[]';"
+                    )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO session_taint
+                    (session_id, integrity, confidentiality, provenance_json, leases_json, untrusted_entities_json, updated_at)
+                    VALUES (?, ?, ?, '[]', '{}', '[]', ?)
+                    """,
+                    (self.session_id, int(Integrity.TRUSTED), int(Confidentiality.PUBLIC), time.time()),
+                )
+                conn.execute("COMMIT;")
+                return
+            except sqlite3.OperationalError:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+                if attempt == 9:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                conn.close()
+
+    def get_state(self) -> StateTuple:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT integrity, confidentiality, provenance_json, leases_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if not row:
+                return StateTuple(Integrity.TRUSTED, Confidentiality.PUBLIC, [], {})
+            return StateTuple(
+                Integrity(row[0]),
+                Confidentiality(row[1]),
+                json.loads(row[2]),
+                json.loads(row[3]),
+            )
+        finally:
+            conn.close()
+
+    def get_untrusted_entities(self) -> list[str]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT untrusted_entities_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            return json.loads(row[0]) if row and row[0] else []
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _extract_untrusted_entities(text: str) -> list[str]:
+        entities: list[str] = []
+        for url in UNTRUSTED_ENTITY_URL_RE.findall(text):
+            cleaned_url = url.rstrip(".,;)")
+            entities.append(cleaned_url)
+            try:
+                host = urllib.parse.urlsplit(cleaned_url).hostname
+                if host:
+                    entities.append(host.lower())
+            except Exception:
+                pass
+        for email in UNTRUSTED_ENTITY_EMAIL_RE.findall(text):
+            entities.append(email.lower())
+        return entities
+
+    def on_tool_response(
+        self,
+        profile: ToolSecurityProfile,
+        arguments: Mapping[str, Any] | str | None = None,
+        response_text: str = "",
+        had_redacted_secrets: bool = False,
+    ) -> tuple[Integrity, Confidentiality]:
+        """
+        Atomically updates session ambient integrity, confidentiality, and untrusted entity provenance
+        inside a `BEGIN IMMEDIATE` transaction.
+        """
+        if isinstance(arguments, Mapping):
+            arg_map: Mapping[str, Any] = arguments
+            arg_summary = ", ".join(f"{k}={repr(v)[:30]}" for k, v in arg_map.items())
+        elif isinstance(arguments, str):
+            arg_map = {"raw": arguments}
+            arg_summary = arguments[:60]
+        else:
+            arg_map = {}
+            arg_summary = ""
+
+        if profile.source_taint_resolver is not None:
+            src_int, src_conf = profile.source_taint_resolver(arg_map, response_text, had_redacted_secrets)
+        else:
+            src_int = profile.source_integrity
+            src_conf = (
+                Confidentiality.SECRET
+                if had_redacted_secrets
+                else profile.source_confidentiality
+            )
+
+        extracted_entities = (
+            self._extract_untrusted_entities(response_text)
+            if (src_int == Integrity.UNTRUSTED or ToolRole.UNTRUSTED_SOURCE in profile.roles) and response_text
+            else []
+        )
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT integrity, confidentiality, provenance_json, untrusted_entities_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            cur_int = Integrity(row[0]) if row else Integrity.TRUSTED
+            cur_conf = Confidentiality(row[1]) if row else Confidentiality.PUBLIC
+            prov: list[str] = json.loads(row[2]) if row else []
+            untrusted_entities: list[str] = json.loads(row[3]) if row and row[3] else []
+
+            new_int = Integrity(min(cur_int, src_int))
+            new_conf = Confidentiality(max(cur_conf, src_conf))
+
+            if new_int < cur_int or new_conf > cur_conf or src_int < Integrity.TRUSTED or src_conf > Confidentiality.PUBLIC:
+                entry = (
+                    f"{profile.fq_name}({arg_summary}) -> "
+                    f"Int:{src_int.name}, Conf:{src_conf.name}"
+                )
+                prov.append(entry)
+
+            for ent in extracted_entities:
+                if ent not in untrusted_entities:
+                    untrusted_entities.append(ent)
+
+            conn.execute(
+                """
+                UPDATE session_taint
+                SET integrity = MIN(integrity, ?),
+                    confidentiality = MAX(confidentiality, ?),
+                    provenance_json = ?,
+                    untrusted_entities_json = ?,
+                    updated_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    int(src_int),
+                    int(src_conf),
+                    json.dumps(prov[-50:]),
+                    json.dumps(untrusted_entities[-100:]),
+                    time.time(),
+                    self.session_id,
+                ),
+            )
+            conn.execute("COMMIT;")
+            return new_int, new_conf
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+
+    def endorse_session(self, note: str = "") -> tuple[Integrity, Confidentiality]:
+        """Upgrades session integrity from `UNTRUSTED` to `ENDORSED`."""
+        self.apply_declassification(DeclassificationAction.ENDORSE_CONTEXT, note=note)
+        cur_int, cur_conf, _, _ = self.get_state()
+        return cur_int, cur_conf
+
+    def reset_turn_integrity(self, note: str = "") -> tuple[Integrity, Confidentiality]:
+        """
+        Resets session integrity back to `Integrity.TRUSTED` at the start of a new authenticated
+        user prompt turn while preserving `Confidentiality` (secrets read earlier in the session
+        remain protected).
+        """
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT confidentiality, provenance_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            cur_conf = Confidentiality(row[0]) if row else Confidentiality.PUBLIC
+            prov: list[str] = json.loads(row[1]) if row else []
+            prov.append(f"[TURN RESET] Restored Integrity:TRUSTED ({note or 'new user prompt'})")
+            conn.execute(
+                """
+                UPDATE session_taint
+                SET integrity = ?, provenance_json = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (int(Integrity.TRUSTED), json.dumps(prov[-50:]), time.time(), self.session_id),
+            )
+            conn.execute("COMMIT;")
+            return Integrity.TRUSTED, cur_conf
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+
+    def apply_declassification(
+        self,
+        action: DeclassificationAction,
+        target_key: str = "PRIVILEGED_MUTATOR",
+        lease_seconds: float = 300.0,
+        note: str = "",
+    ) -> None:
+        """
+        Records a human step-up decision in SQLite:
+        - `LEASE_MUTATOR_5M`: Grants a 5-minute lease for local workspace mutations without popups.
+        - `ENDORSE_CONTEXT`: Elevates ambient integrity from UNTRUSTED -> ENDORSED (keeps SECRET confidentiality intact).
+        """
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT integrity, confidentiality, provenance_json, leases_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if not row:
+                conn.execute("COMMIT;")
+                return
+            cur_int, cur_conf, prov_raw, leases_raw = row
+            prov: list[str] = json.loads(prov_raw)
+            leases: dict[str, float] = json.loads(leases_raw)
+
+            if action == DeclassificationAction.LEASE_MUTATOR_5M:
+                leases[target_key] = time.time() + lease_seconds
+                prov.append(f"[HUMAN STEP-UP] Granted {int(lease_seconds)}s lease for `{target_key}`")
+            elif action == DeclassificationAction.ENDORSE_CONTEXT:
+                if cur_int == int(Integrity.UNTRUSTED):
+                    cur_int = int(Integrity.ENDORSED)
+                suffix = f" ({note})" if note else ""
+                prov.append(f"[HUMAN STEP-UP] Endorsed current untrusted context -> Integrity:ENDORSED{suffix}")
+
+            conn.execute(
+                """
+                UPDATE session_taint
+                SET integrity = ?, provenance_json = ?, leases_json = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (cur_int, json.dumps(prov[-50:]), json.dumps(leases), time.time(), self.session_id),
+            )
+            conn.execute("COMMIT;")
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+
+    def on_tool_call(
+        self,
+        profile: ToolSecurityProfile,
+        arguments: Mapping[str, Any],
+    ) -> GateEvaluation:
+        ambient_int, ambient_conf, prov, leases = self.get_state()
+        untrusted_entities = self.get_untrusted_entities()
+        now = time.time()
+
+        # 1. Deterministic Argument Guard (Hard DENY — never bypassed by leases)
+        if profile.arg_guard is not None:
+            ok, reason = profile.arg_guard(arguments)
+            if not ok:
+                human_msg = (
+                    f"Blocked `{profile.fq_name}` because its arguments violated a deterministic safety rule: {reason}"
+                )
+                return self._finalize(
+                    GateEvaluation(
+                        decision=GateDecisionType.DENY,
+                        effective_decision=GateDecisionType.ALLOW if self.mode == EnforcementMode.SHADOW else GateDecisionType.DENY,
+                        mode=self.mode,
+                        reason=f"Argument policy violation on {profile.fq_name}: {reason}",
+                        human_summary=human_msg,
+                        ambient_integrity=ambient_int,
+                        ambient_confidentiality=ambient_conf,
+                        provenance_log=prov,
+                    ),
+                    profile,
+                    arguments,
+                )
+
+        # 1B. Automatic Outbound SSRF, Cloud Metadata (`169.254.169.254`) & High-Entropy DNS Exfil Guard (Primitive A)
+        if ToolRole.EXTERNAL_EGRESS_SINK in profile.roles:
+            ssrf_ok, ssrf_reason = make_ssrf_and_dns_guard()(arguments)
+            if not ssrf_ok:
+                human_msg = (
+                    f"Blocked `{profile.fq_name}` due to outbound network / SSRF / DNS exfiltration violation: {ssrf_reason}"
+                )
+                return self._finalize(
+                    GateEvaluation(
+                        decision=GateDecisionType.DENY,
+                        effective_decision=GateDecisionType.ALLOW if self.mode == EnforcementMode.SHADOW else GateDecisionType.DENY,
+                        mode=self.mode,
+                        reason=f"[SSRF / DNS EXFILTRATION BLOCKED] {ssrf_reason}",
+                        human_summary=human_msg,
+                        ambient_integrity=ambient_int,
+                        ambient_confidentiality=ambient_conf,
+                        provenance_log=prov,
+                    ),
+                    profile,
+                    arguments,
+                )
+
+        # 1C. MELON Provenance Attribution Check: Block sink/mutator arguments containing untrusted entities
+        is_sink_or_mutator = bool(
+            profile.roles & {ToolRole.PRIVILEGED_MUTATOR, ToolRole.EXTERNAL_EGRESS_SINK, ToolRole.WORKSPACE_MUTATOR}
+        )
+        if is_sink_or_mutator and untrusted_entities:
+            serialized_args = json.dumps(arguments, ensure_ascii=False).lower()
+            for ent in untrusted_entities:
+                if ent.lower() in serialized_args:
+                    reason = (
+                        f"[PROVENANCE HIJACK BLOCKED] Target argument originated inside untrusted external data: '{ent}'"
+                    )
+                    return self._finalize(
+                        GateEvaluation(
+                            decision=GateDecisionType.DENY,
+                            effective_decision=GateDecisionType.ALLOW if self.mode == EnforcementMode.SHADOW else GateDecisionType.DENY,
+                            mode=self.mode,
+                            reason=reason,
+                            human_summary=f"Blocked `{profile.fq_name}` because parameter matched untrusted external entity `{ent}`.",
+                            ambient_integrity=ambient_int,
+                            ambient_confidentiality=ambient_conf,
+                            provenance_log=prov,
+                        ),
+                        profile,
+                        arguments,
+                    )
+
+        # 2. Check Scoped Lease for Non-Egress Workspace Mutators
+        is_mutator_only = (
+            bool(profile.roles & {ToolRole.PRIVILEGED_MUTATOR, ToolRole.WORKSPACE_MUTATOR})
+            and ToolRole.EXTERNAL_EGRESS_SINK not in profile.roles
+        )
+        active_lease = None
+        if is_mutator_only:
+            for key in (profile.fq_name, "PRIVILEGED_MUTATOR"):
+                if leases.get(key, 0.0) > now:
+                    active_lease = key
+                    break
+
+        if active_lease is not None:
+            return self._finalize(
+                GateEvaluation(
+                    decision=GateDecisionType.ALLOW,
+                    effective_decision=GateDecisionType.ALLOW,
+                    mode=self.mode,
+                    reason=f"Permitted under active human step-up lease '{active_lease}'.",
+                    human_summary=f"Allowed `{profile.fq_name}` under your active 5-minute workspace edit lease.",
+                    lease_applied=active_lease,
+                    ambient_integrity=ambient_int,
+                    ambient_confidentiality=ambient_conf,
+                    provenance_log=prov,
+                ),
+                profile,
+                arguments,
+            )
+
+        # 3. Evaluate Ambient Taint & Lethal Trifecta
+        reasons: list[str] = []
+        causal_parts: list[str] = []
+
+        if is_sink_or_mutator and ambient_int < profile.min_required_integrity:
+            reasons.append(
+                f"Session integrity is {ambient_int.name} (requires >= {profile.min_required_integrity.name})."
+            )
+            causal_parts.append("ingested untrusted external content")
+
+        if ToolRole.EXTERNAL_EGRESS_SINK in profile.roles and ambient_conf > profile.max_allowed_confidentiality:
+            reasons.append(
+                f"Session holds {ambient_conf.name} data (sink egress ceiling: {profile.max_allowed_confidentiality.name})."
+            )
+            causal_parts.append(f"read {ambient_conf.name.lower()} private data")
+
+        trifecta = (
+            ambient_int == Integrity.UNTRUSTED
+            and ambient_conf >= Confidentiality.CONFIDENTIAL
+            and is_sink_or_mutator
+        )
+
+        if reasons:
+            prefix = "[LETHAL TRIFECTA CIRCUIT BREAKER] " if trifecta else "[TAINT POLICY TRIGGER] "
+            action_desc = (
+                f"send data outside your machine via `{profile.fq_name}`"
+                if ToolRole.EXTERNAL_EGRESS_SINK in profile.roles
+                else f"modify system state via `{profile.fq_name}`"
+            )
+            human_msg = (
+                f"Paused `{profile.fq_name}`: This session {' AND '.join(causal_parts)}, "
+                f"and the agent is now attempting to {action_desc}."
+            )
+            return self._finalize(
+                GateEvaluation(
+                    decision=GateDecisionType.STEP_UP,
+                    effective_decision=GateDecisionType.ALLOW if self.mode == EnforcementMode.SHADOW else GateDecisionType.STEP_UP,
+                    mode=self.mode,
+                    reason=prefix + " | ".join(reasons),
+                    human_summary=human_msg,
+                    trifecta_triggered=trifecta,
+                    ambient_integrity=ambient_int,
+                    ambient_confidentiality=ambient_conf,
+                    provenance_log=prov,
+                ),
+                profile,
+                arguments,
+            )
+
+        return self._finalize(
+            GateEvaluation(
+                decision=GateDecisionType.ALLOW,
+                effective_decision=GateDecisionType.ALLOW,
+                mode=self.mode,
+                reason="Permitted within current session taint bounds.",
+                human_summary=f"Allowed `{profile.fq_name}` (Session taint within safe bounds).",
+                ambient_integrity=ambient_int,
+                ambient_confidentiality=ambient_conf,
+                provenance_log=prov,
+            ),
+            profile,
+            arguments,
+        )
+
+    def _finalize(
+        self,
+        evaluation: GateEvaluation,
+        profile: ToolSecurityProfile,
+        arguments: Mapping[str, Any],
+    ) -> GateEvaluation:
+        """Appends tamper-evident structured record to `audit.jsonl`."""
+        record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "session_id": self.session_id,
+            "mode": evaluation.mode.value,
+            "tool": profile.fq_name,
+            "policy_decision": evaluation.decision.name,
+            "wire_decision": evaluation.effective_decision.name,
+            "trifecta": evaluation.trifecta_triggered,
+            "ambient_integrity": evaluation.ambient_integrity.name,
+            "ambient_confidentiality": evaluation.ambient_confidentiality.name,
+            "human_summary": evaluation.human_summary,
+        }
+        with open(self.audit_log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+        return evaluation
+
+
+# -----------------------------------------------------------------------------
+# Primitive 2: Cross-Process SQLite-Backed `BidirectionalSecretScrubber`
+# -----------------------------------------------------------------------------
+
+class BidirectionalSecretScrubber:
+    """
+    Cross-process SQLite-backed secret scrubber.
+    When Process 1 (`filesystem`) mints `<MCP_REDACTED_OPENAI_KEY_1>`, the token-to-secret
+    mapping is persisted in SQLite WAL so Process 2 (`slack`) immediately recognizes and
+    blocks exfiltration of that token, while authorized tools (matched by exact placeholder
+    OR secret `kind`) can rehydrate it on the wire.
+    """
+
+    SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+        ("PRIVATE_KEY_PEM", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+        ("ANTHROPIC_KEY", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")),
+        ("OPENAI_KEY", re.compile(r"sk-(?!ant-)(?:proj-)?[A-Za-z0-9_\-]{20,}")),
+        ("STRIPE_KEY", re.compile(r"(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{20,}")),
+        ("GITHUB_PAT", re.compile(r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,255}")),
+        ("AWS_ACCESS_KEY", re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")),
+        ("SLACK_TOKEN", re.compile(r"xox[baprs]-[0-9A-Za-z\-]{10,}")),
+        ("JWT_TOKEN", re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+        ("DB_CONN_URI", re.compile(r"(?:postgres(?:ql)?|mongodb(?:\+srv)?|mysql|redis)://[^:\s]+:([^@\s]+)@[^\s\"']+")),
+        ("JSON_YAML_SECRET", re.compile(r"(?i)([\"']?(?:client_secret|api_key|access_token|db_password|secret_key)[\"']?\s*:\s*[\"'])([^\"'\s]{8,})([\"'])")),
+        ("ENV_ASSIGNMENT", re.compile(r"(?m)^([A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|PRIVATE_KEY|API_KEY)[A-Z0-9_]*\s*=\s*)(['\"]?[^\s'\"#]+['\"]?)")),
+    ]
+
+    TOKEN_SCAN_REGEX = re.compile(r"<MCP_REDACTED_([A-Z0-9_]+)_(\d+)>")
+
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        allowed_rehydration_tools: dict[str, set[str]] | None = None,
+    ) -> None:
+        self.db_path = db_path
+        self._mem_vault: dict[str, tuple[str, str]] = {}
+        self.allowed_rehydration_tools = allowed_rehydration_tools or {}
+        if self.db_path is not None:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        assert self.db_path is not None
+        conn = sqlite3.connect(str(self.db_path), timeout=15.0, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=15000;")
+        return conn
+
+    def _init_db(self) -> None:
+        for attempt in range(10):
+            conn = self._connect()
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("BEGIN IMMEDIATE;")
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS secret_vault (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        kind TEXT NOT NULL,
+                        raw_secret TEXT NOT NULL UNIQUE,
+                        placeholder TEXT
+                    )
+                    """
+                )
+                conn.execute("COMMIT;")
+                return
+            except sqlite3.OperationalError:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+                if attempt == 9:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                conn.close()
+
+    def _mint_placeholder(self, kind: str, raw_secret: str) -> str:
+        if self.db_path is None:
+            for tok, (k, sec) in self._mem_vault.items():
+                if sec == raw_secret:
+                    return tok
+            seq_id = len(self._mem_vault) + 1
+            placeholder = f"<MCP_REDACTED_{kind}_{seq_id}>"
+            self._mem_vault[placeholder] = (kind, raw_secret)
+            return placeholder
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            row = conn.execute(
+                "SELECT placeholder FROM secret_vault WHERE raw_secret = ?",
+                (raw_secret,),
+            ).fetchone()
+            if row and row[0]:
+                conn.execute("COMMIT;")
+                return str(row[0])
+
+            cursor = conn.execute(
+                "INSERT INTO secret_vault (kind, raw_secret) VALUES (?, ?)",
+                (kind, raw_secret),
+            )
+            seq_id = cursor.lastrowid
+            placeholder = f"<MCP_REDACTED_{kind}_{seq_id}>"
+            conn.execute(
+                "UPDATE secret_vault SET placeholder = ? WHERE id = ?",
+                (placeholder, seq_id),
+            )
+            conn.execute("COMMIT;")
+            return placeholder
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+
+    def lookup_placeholder(self, placeholder: str) -> str | None:
+        if self.db_path is None:
+            entry = self._mem_vault.get(placeholder)
+            return entry[1] if entry else None
+
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT raw_secret FROM secret_vault WHERE placeholder = ?",
+                (placeholder,),
+            ).fetchone()
+            return str(row[0]) if row else None
+        finally:
+            conn.close()
+
+    def scrub_text(self, text: str) -> tuple[str, list[str]]:
+        minted: list[str] = []
+        scrubbed = text
+        for kind, pattern in self.SECRET_PATTERNS:
+            if kind == "ENV_ASSIGNMENT":
+                def _env_repl(match: re.Match[str]) -> str:
+                    prefix, secret_val = match.group(1), match.group(2)
+                    if "<MCP_REDACTED_" in secret_val:
+                        return match.group(0)
+                    tok = self._mint_placeholder("ENV_SECRET", secret_val)
+                    minted.append(tok)
+                    return f"{prefix}{tok}"
+                scrubbed = pattern.sub(_env_repl, scrubbed)
+            elif kind == "JSON_YAML_SECRET":
+                def _json_repl(match: re.Match[str]) -> str:
+                    prefix, secret_val, suffix = match.group(1), match.group(2), match.group(3)
+                    if "<MCP_REDACTED_" in secret_val:
+                        return match.group(0)
+                    tok = self._mint_placeholder("CONFIG_SECRET", secret_val)
+                    minted.append(tok)
+                    return f"{prefix}{tok}{suffix}"
+                scrubbed = pattern.sub(_json_repl, scrubbed)
+            elif kind == "DB_CONN_URI":
+                def _uri_repl(match: re.Match[str]) -> str:
+                    full_uri = match.group(0)
+                    password = match.group(1)
+                    if "<MCP_REDACTED_" in password:
+                        return full_uri
+                    tok = self._mint_placeholder("DB_PASSWORD", password)
+                    minted.append(tok)
+                    return full_uri.replace(f":{password}@", f":{tok}@", 1)
+                scrubbed = pattern.sub(_uri_repl, scrubbed)
+            else:
+                def _std_repl(match: re.Match[str], k: str = kind) -> str:
+                    tok = self._mint_placeholder(k, match.group(0))
+                    minted.append(tok)
+                    return tok
+                scrubbed = pattern.sub(_std_repl, scrubbed)
+        return scrubbed, minted
+
+    def inspect_and_rehydrate_args(self, fq_tool_name: str, obj: Any) -> Any:
+        """
+        Scans incoming tool arguments across ANY process using the shared SQLite vault.
+        Supports authorization lookup by either exact token (`<MCP_REDACTED_OPENAI_KEY_1>`)
+        or secret kind (`OPENAI_KEY`).
+        """
+        if isinstance(obj, str):
+            result = obj
+            for match_obj in self.TOKEN_SCAN_REGEX.finditer(result):
+                full_token = match_obj.group(0)
+                kind = match_obj.group(1)
+                raw_secret = self.lookup_placeholder(full_token)
+                allowed = (
+                    self.allowed_rehydration_tools.get(full_token, set())
+                    | self.allowed_rehydration_tools.get(kind, set())
+                )
+                if fq_tool_name not in allowed:
+                    raise PermissionError(
+                        f"[SECRET EXFILTRATION BLOCKED] LLM attempted to pass redacted secret {full_token} "
+                        f"to unauthorized sink '{fq_tool_name}'."
+                    )
+                if raw_secret is not None:
+                    result = result.replace(full_token, raw_secret)
+            return result
+        if isinstance(obj, list):
+            return [self.inspect_and_rehydrate_args(fq_tool_name, x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: self.inspect_and_rehydrate_args(fq_tool_name, v) for k, v in obj.items()}
+        return obj
+
+
+# -----------------------------------------------------------------------------
+# Primitive 3: Structural `SchemaLockVerifier` & `ToxicFlowGraphAnalyzer`
+# -----------------------------------------------------------------------------
+
+class SchemaLockVerifier:
+    """
+    Pins sanitized MCP tool definitions in `mcp-lock.json`, strips structural prompt-injection
+    patterns (`<IMPORTANT>`, HTML comments, hidden file-inclusion directives), and detects
+    cross-server tool shadowing (`MCPTox` / Invariant Labs attack).
+    """
+
+    INJECTION_MARKERS = re.compile(
+        r"(?i)(<\s*(?:important|system|instruction)[^>]*>[\s\S]*?<\s*/\s*(?:important|system|instruction)\s*>|"
+        r"<!--[\s\S]*?-->|"
+        r"ignore\s+(?:all\s+)?previous\s+instructions|"
+        r"system\s*prompt\s*:|"
+        r"do\s+not\s+(?:mention|tell|inform)\s+[^.\n]+|"
+        r"(?:before|prior\s+to|whenever)\s+(?:calling|running|invoking|returning)[^.\n]*(?:read|fetch|send|include)\s+[^.\n]+\.?)"
+    )
+
+    SHADOWING_VERBS_RE = re.compile(
+        r"(?i)\b(?:whenever|before|after|when)\s+(?:calling|invoking|using|running)\s+([a-z0-9_.\-]+)"
+    )
+
+    def __init__(self, lockfile_path: Path, known_servers: set[str] | None = None) -> None:
+        self.lockfile_path = lockfile_path
+        self.known_servers = {s.lower() for s in (known_servers or set())}
+        self.locks: dict[str, str] = {}
+        if self.lockfile_path.exists():
+            self.locks = json.loads(self.lockfile_path.read_text())
+
+    @staticmethod
+    def compute_tool_hash(server: str, tool_def: dict[str, Any]) -> str:
+        canonical = json.dumps(
+            {
+                "server": server,
+                "name": tool_def.get("name"),
+                "description": tool_def.get("description"),
+                "inputSchema": tool_def.get("inputSchema"),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def verify_and_sanitize_tools_list(
+        self, server: str, tools: list[dict[str, Any]], *, auto_pin_new: bool = False
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        sanitized: list[dict[str, Any]] = []
+        alerts: list[str] = []
+        updated = False
+
+        for tool in tools:
+            fq_name = f"{server}.{tool.get('name')}"
+            clean_tool = dict(tool)
+            desc = clean_tool.get("description") or ""
+
+            # 1. Detect cross-server shadowing references before stripping
+            other_servers = self.known_servers - {server.lower()}
+            if any(re.search(rf"(?i)\b{re.escape(other)}\b", desc) for other in other_servers) or self.SHADOWING_VERBS_RE.search(desc):
+                alerts.append(
+                    f"[CROSS-SERVER SHADOWING] Tool `{fq_name}` attempted to hook or shadow another server/tool."
+                )
+
+            # 2. Strip structural prompt-injection markers
+            if self.INJECTION_MARKERS.search(desc):
+                alerts.append(f"Stripped tool-poisoning injection from `{fq_name}` description.")
+            clean_tool["description"] = self.INJECTION_MARKERS.sub("[STRIPPED_BY_MCP_CAGE]", desc).strip()
+
+            # 3. Compute SHA-256 over the sanitized tool definition and verify/pin in `mcp-lock.json`
+            digest = self.compute_tool_hash(server, clean_tool)
+            if fq_name in self.locks:
+                if self.locks[fq_name] != digest:
+                    raise RuntimeError(
+                        f"[MCP RUG-PULL DETECTED] Tool definition for '{fq_name}' mutated after pinning! "
+                        f"Expected SHA-256 {self.locks[fq_name][:12]}..., got {digest[:12]}..."
+                    )
+            elif auto_pin_new:
+                self.locks[fq_name] = digest
+                updated = True
+            else:
+                raise RuntimeError(f"[UNPINNED MCP TOOL] '{fq_name}' is not in {self.lockfile_path}.")
+
+            sanitized.append(clean_tool)
+
+        if updated:
+            self.lockfile_path.parent.mkdir(parents=True, exist_ok=True)
+            self.lockfile_path.write_text(json.dumps(self.locks, indent=2, sort_keys=True))
+
+        return sanitized, alerts
+
+
+@dataclass(frozen=True)
+class ToxicFlowFinding:
+    severity: str
+    pattern_type: str
+    untrusted_source: str
+    private_source: str | None
+    sink: str
+    exploit_narrative: str
+
+
+class ToxicFlowGraphAnalyzer:
+    """
+    Static analyzer (`mcp-sploit`) that maps Lethal Trifecta paths across configured MCP servers.
+    Uses word-boundary regex tokens + official MCP 2025 tool `annotations`
+    (`readOnlyHint`, `destructiveHint`, `openWorldHint`) + dual-role classification for
+    `fetch`/`web`/`browser`/`http`/`curl` (which act as both `UNTRUSTED_SOURCE` and `EXTERNAL_EGRESS_SINK`).
+    """
+
+    UNTRUSTED_REGEX = re.compile(
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel)(?:$|[._])"
+    )
+    PRIVATE_REGEX = re.compile(
+        r"(?i)(?:^|[._])(read_file|read_text_file|query|select_sql|get_secret|read_env|customer_db)(?:$|[._])"
+    )
+    MUTATOR_REGEX = re.compile(
+        r"(?i)(?:^|[._])(bash|exec|run_command|run_shell_command|write_file|delete_file|execute_sql|drop_table|git_push|merge_pr)(?:$|[._])"
+    )
+    EGRESS_REGEX = re.compile(
+        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl)(?:$|[._])"
+    )
+
+    @classmethod
+    def classify_tool(
+        cls,
+        server: str,
+        tool_or_def: Mapping[str, Any] | str,
+        description: str = "",
+    ) -> set[ToolRole]:
+        if isinstance(tool_or_def, Mapping):
+            tool_name = str(tool_or_def.get("name", ""))
+            annotations = tool_or_def.get("annotations") or {}
+        else:
+            tool_name = str(tool_or_def)
+            annotations = {}
+
+        fq = f"{server}.{tool_name}"
+        roles: set[ToolRole] = set()
+
+        # 1. Word-boundary tool identifier matching
+        if cls.UNTRUSTED_REGEX.search(fq):
+            roles.add(ToolRole.UNTRUSTED_SOURCE)
+        if cls.PRIVATE_REGEX.search(fq):
+            roles.add(ToolRole.PRIVATE_SOURCE)
+        if cls.MUTATOR_REGEX.search(fq):
+            roles.add(ToolRole.PRIVILEGED_MUTATOR)
+        if cls.EGRESS_REGEX.search(fq):
+            roles.add(ToolRole.EXTERNAL_EGRESS_SINK)
+
+        # 2. Official MCP 2025 Tool Annotations support
+        if annotations.get("destructiveHint") is True:
+            roles.add(ToolRole.PRIVILEGED_MUTATOR)
+        if annotations.get("openWorldHint") is True and annotations.get("readOnlyHint") is True:
+            roles.add(ToolRole.UNTRUSTED_SOURCE)
+        elif annotations.get("openWorldHint") is True and annotations.get("readOnlyHint") is False:
+            roles.add(ToolRole.EXTERNAL_EGRESS_SINK)
+
+        return roles or {ToolRole.NEUTRAL}
+
+    @classmethod
+    def build_default_profile(
+        cls, server: str, tool_name: str, description: str = ""
+    ) -> ToolSecurityProfile:
+        roles = frozenset(cls.classify_tool(server, tool_name, description))
+        is_egress = ToolRole.EXTERNAL_EGRESS_SINK in roles
+        is_mutator = ToolRole.PRIVILEGED_MUTATOR in roles
+        return ToolSecurityProfile(
+            server=server,
+            tool_name=tool_name,
+            roles=roles,
+            source_integrity=(
+                Integrity.UNTRUSTED if ToolRole.UNTRUSTED_SOURCE in roles else Integrity.TRUSTED
+            ),
+            source_confidentiality=(
+                Confidentiality.CONFIDENTIAL if ToolRole.PRIVATE_SOURCE in roles else Confidentiality.PUBLIC
+            ),
+            min_required_integrity=(
+                Integrity.TRUSTED if (is_egress or is_mutator) else Integrity.UNTRUSTED
+            ),
+            max_allowed_confidentiality=(
+                Confidentiality.PUBLIC if is_egress else Confidentiality.SECRET
+            ),
+            arg_guard=make_ssrf_and_dns_guard() if is_egress else None,
+        )
+
+    @classmethod
+    def audit_mcp_tools(
+        cls, server_tools: dict[str, list[dict[str, Any]]]
+    ) -> tuple[dict[str, list[str]], list[ToxicFlowFinding]]:
+        classified: dict[str, list[str]] = {
+            "UNTRUSTED_SOURCES": [],
+            "PRIVATE_SOURCES": [],
+            "MUTATOR_SINKS": [],
+            "EGRESS_SINKS": [],
+        }
+
+        for server, tools in server_tools.items():
+            for t in tools:
+                fq = f"{server}.{t['name']}"
+                roles = cls.classify_tool(server, t)
+                if ToolRole.UNTRUSTED_SOURCE in roles:
+                    classified["UNTRUSTED_SOURCES"].append(fq)
+                if ToolRole.PRIVATE_SOURCE in roles:
+                    classified["PRIVATE_SOURCES"].append(fq)
+                if ToolRole.PRIVILEGED_MUTATOR in roles:
+                    classified["MUTATOR_SINKS"].append(fq)
+                if ToolRole.EXTERNAL_EGRESS_SINK in roles:
+                    classified["EGRESS_SINKS"].append(fq)
+
+        findings: list[ToxicFlowFinding] = []
+        for u in classified["UNTRUSTED_SOURCES"]:
+            for p in classified["PRIVATE_SOURCES"]:
+                for s in classified["EGRESS_SINKS"]:
+                    if len({u, p, s}) >= 2:
+                        findings.append(
+                            ToxicFlowFinding(
+                                severity="CRITICAL",
+                                pattern_type="LETHAL_TRIFECTA_EXFIL",
+                                untrusted_source=u,
+                                private_source=p,
+                                sink=s,
+                                exploit_narrative=(
+                                    f"[{p}] (Private) + [{u}] (Untrusted) ==> [{s}] (External Sink)"
+                                ),
+                            )
+                        )
+
+        for u in classified["UNTRUSTED_SOURCES"]:
+            for m in classified["MUTATOR_SINKS"]:
+                if u != m:
+                    findings.append(
+                        ToxicFlowFinding(
+                            severity="HIGH",
+                            pattern_type="INDIRECT_INJECTION_MUTATION",
+                            untrusted_source=u,
+                            private_source=None,
+                            sink=m,
+                            exploit_narrative=(
+                                f"[{u}] (Untrusted) ==> [{m}] (Privileged State Mutation)"
+                            ),
+                        )
+                    )
+
+        return classified, findings
+
+
+# -----------------------------------------------------------------------------
+# Primitive B: `CurXecute` / `MCPoison` Workspace Config Auditor (`audit-config`)
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ConfigAuditFinding:
+    severity: str          # "CRITICAL", "HIGH", "MEDIUM"
+    rule_id: str           # "CURXECUTE_RCE_COMMAND", "PLAINTEXT_ENV_SECRET", "UNWRAPPED_MCP_SERVER"
+    server_name: str
+    source_path: str
+    message: str
+    remediation: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "severity": self.severity,
+            "rule_id": self.rule_id,
+            "server_name": self.server_name,
+            "source_path": self.source_path,
+            "message": self.message,
+            "remediation": self.remediation,
+        }
+
+
+class WorkspaceMCPConfigAuditor:
+    """
+    Primitive B: Audits `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and
+    `claude_desktop_config.json` files for:
+    1. `CRITICAL` (`CurXecute` / `MCPoison` RCE — CVE-2025-54135):
+       - Relative or workspace/tmp binary paths (`./`, `../`, `/tmp/`, `/var/tmp/`)
+       - Shell wrappers or inline eval (`sh -c`, `bash -c`, `cmd /c`, `powershell`, `eval`, `curl`, `wget`)
+       - Command chaining / subshell injection (`;`, `&&`, `||`, `|`, backticks, `$()`)
+    2. `HIGH` (Plaintext Credential Leak):
+       - Hardcoded API keys/secrets inside `env` blocks or `args` matching `BidirectionalSecretScrubber.SECRET_PATTERNS`
+         instead of `${ENV_VAR}` references.
+    3. `MEDIUM` (Unwrapped MCP Server):
+       - MCP servers not wrapped by `mcp-cage wrap`.
+    """
+
+    RELATIVE_OR_TMP_EXEC_RE = re.compile(
+        r"(?i)(?:^|\s)(?:\./|\.\./|~\b|/tmp/|/var/tmp/|\.git/|\.cursor/|\.vscode/)"
+    )
+    SHELL_WRAPPER_RE = re.compile(
+        r"(?i)(?:^|[/\\])(sh|bash|zsh|dash|cmd|cmd\.exe|powershell|pwsh|eval|curl|wget|nc|ncat|netcat)$"
+    )
+    INLINE_EXEC_FLAG_RE = re.compile(
+        r"(?i)(?:\b(?:sh|bash|zsh)\s+-c\b|\bcmd(?:\.exe)?\s+/c\b|\b(?:powershell|pwsh)\b.*-(?:e|enc|encodedcommand|c|command)\b|\b(?:eval|curl|wget)\b|\bpython3?\s+-c\b|\bnode\s+-e\b)"
+    )
+    CHAINING_METACHAR_RE = re.compile(r"[;|&`>]|&&|\|\||\$\(")
+    ENV_INTERPOLATION_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$|^%[^%]+%$")
+    SENSITIVE_ENV_NAME_RE = re.compile(r"(?i)(SECRET|TOKEN|PASSWORD|PRIVATE_KEY|API_KEY|AUTH|CREDENTIALS)")
+
+    @classmethod
+    def audit_config_dict(
+        cls, config: Mapping[str, Any], source_path: str = "<config>"
+    ) -> list[ConfigAuditFinding]:
+        findings: list[ConfigAuditFinding] = []
+        servers = config.get("mcpServers") or config.get("servers") or {}
+        if not isinstance(servers, Mapping):
+            return findings
+
+        for srv_name, srv_cfg in servers.items():
+            if not isinstance(srv_cfg, Mapping):
+                continue
+            command = str(srv_cfg.get("command") or "").strip()
+            raw_args = srv_cfg.get("args") or []
+            args = [str(a) for a in raw_args] if isinstance(raw_args, (list, tuple)) else [str(raw_args)]
+            env_block = srv_cfg.get("env") or {}
+            full_cmd_str = " ".join([command, *args]).strip()
+
+            # 1. CRITICAL: CurXecute / MCPoison RCE checks
+            rce_reasons: list[str] = []
+            if cls.RELATIVE_OR_TMP_EXEC_RE.search(command) or any(
+                cls.RELATIVE_OR_TMP_EXEC_RE.search(a) and idx == 0 for idx, a in enumerate(args)
+            ):
+                rce_reasons.append(
+                    f"relative or temporary binary path in command `{full_cmd_str}`"
+                )
+            elif any(cls.RELATIVE_OR_TMP_EXEC_RE.search(a) and (a.endswith(".sh") or a.endswith(".py") or a.endswith(".js") or "/tmp/" in a) for a in args):
+                rce_reasons.append(
+                    f"workspace-relative or `/tmp/` script execution in `{full_cmd_str}`"
+                )
+
+            if cls.SHELL_WRAPPER_RE.search(command) or cls.INLINE_EXEC_FLAG_RE.search(full_cmd_str):
+                rce_reasons.append(
+                    f"dangerous shell/network wrapper execution (`{full_cmd_str}`)"
+                )
+
+            if cls.CHAINING_METACHAR_RE.search(full_cmd_str):
+                rce_reasons.append(
+                    f"shell command chaining or subshell injection metacharacters in `{full_cmd_str}`"
+                )
+
+            if rce_reasons:
+                findings.append(
+                    ConfigAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="CURXECUTE_RCE_COMMAND",
+                        server_name=str(srv_name),
+                        source_path=source_path,
+                        message=(
+                            f"[CurXecute / MCPoison RCE Risk] Server '{srv_name}' uses "
+                            + "; ".join(rce_reasons)
+                            + "."
+                        ),
+                        remediation=(
+                            "Replace shell wrappers and workspace-relative scripts with pinned package "
+                            "entrypoints wrapped via `mcp-cage wrap --server <name> -- <cmd>`."
+                        ),
+                    )
+                )
+
+            # 2. HIGH: Plaintext Credential Leak inside `env` block or `args`
+            if isinstance(env_block, Mapping):
+                for env_k, env_v in env_block.items():
+                    val_str = str(env_v).strip()
+                    if not val_str or cls.ENV_INTERPOLATION_RE.match(val_str):
+                        continue
+                    matched_kind = None
+                    for kind, pat in BidirectionalSecretScrubber.SECRET_PATTERNS:
+                        if kind in ("ENV_ASSIGNMENT", "JSON_YAML_SECRET"):
+                            continue
+                        if pat.search(val_str):
+                            matched_kind = kind
+                            break
+                    if matched_kind is None and cls.SENSITIVE_ENV_NAME_RE.search(str(env_k)) and len(val_str) >= 12:
+                        matched_kind = "HARDCODED_SECRET_VALUE"
+
+                    if matched_kind is not None:
+                        findings.append(
+                            ConfigAuditFinding(
+                                severity="HIGH",
+                                rule_id="PLAINTEXT_ENV_SECRET",
+                                server_name=str(srv_name),
+                                source_path=source_path,
+                                message=(
+                                    f"[Plaintext Secret in Config] Server '{srv_name}' hardcodes `{env_k}` "
+                                    f"(matched `{matched_kind}`) in plaintext instead of an environment reference."
+                                ),
+                                remediation=f"Replace hardcoded secret in `{env_k}` with `${{{env_k}}}` and load from OS keychain.",
+                            )
+                        )
+
+            # 3. MEDIUM: Unwrapped MCP Server
+            is_wrapped = (
+                "mcp-cage" in command
+                or "mcp_cage" in command
+                or any("mcp-cage" in a or "mcp_cage" in a for a in args)
+            ) and "wrap" in args
+            if not is_wrapped and command:
+                findings.append(
+                    ConfigAuditFinding(
+                        severity="MEDIUM",
+                        rule_id="UNWRAPPED_MCP_SERVER",
+                        server_name=str(srv_name),
+                        source_path=source_path,
+                        message=(
+                            f"[Unwrapped MCP Server] Server '{srv_name}' (`{command}`) runs without `mcp-cage wrap` wire protection."
+                        ),
+                        remediation=(
+                            f"Wrap '{srv_name}' with: `mcp-cage wrap --server {srv_name} -- {full_cmd_str}`"
+                        ),
+                    )
+                )
+
+        return findings
+
+    @classmethod
+    def audit_config_file(cls, path: Path) -> list[ConfigAuditFinding]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls.audit_config_dict(data, source_path=str(path))
+
+    @classmethod
+    def discover_and_audit(cls, root: Path, explicit_paths: list[Path] | None = None) -> dict[str, Any]:
+        candidate_paths: list[Path] = []
+        if explicit_paths:
+            candidate_paths.extend(explicit_paths)
+        else:
+            for rel in (
+                ".mcp.json",
+                ".cursor/mcp.json",
+                ".vscode/mcp.json",
+                "claude_desktop_config.json",
+            ):
+                p = root / rel
+                if p.exists():
+                    candidate_paths.append(p)
+
+        all_findings: list[ConfigAuditFinding] = []
+        audited_files: list[str] = []
+        for p in candidate_paths:
+            if p.exists() and p.is_file():
+                audited_files.append(str(p))
+                all_findings.extend(cls.audit_config_file(p))
+
+        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0}
+        for f in all_findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+
+        return {
+            "audited_files": audited_files,
+            "summary": counts,
+            "findings": [f.to_dict() for f in all_findings],
+        }
+
+
+# -----------------------------------------------------------------------------
+# Plane A: `MCPWireGateway` (Async & Sync JSON-RPC 2.0 Proxy with Spotlighting)
+# -----------------------------------------------------------------------------
+
+@dataclass
+class InFlightRequest:
+    req_id: int | str
+    method: str
+    tool_name: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+class MCPWireGateway:
+    """
+    Plane A JSON-RPC 2.0 Wire Gateway (`MCPWireGateway`) supporting:
+    - `in_flight_requests` correlation across `tools/list`, `tools/call`, and `resources/read`
+    - Microsoft Spotlighting (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) on untrusted tool outputs
+    - Secret scrubbing on `tools/call` results, `resources/read` contents, AND `error.message`
+    - `sampling/createMessage` server-to-client hijack blocking when session is tainted
+    - Async `run_stdio_proxy` for subprocess stdio pipelines
+    """
+
+    def __init__(
+        self,
+        server_name: str,
+        state_machine: SessionTaintStateMachine,
+        scrubber: BidirectionalSecretScrubber,
+        verifier: SchemaLockVerifier,
+        workspace_root: Path | None = None,
+        tool_profiles: dict[str, ToolSecurityProfile] | None = None,
+    ) -> None:
+        self.server_name = server_name
+        self.state_machine = state_machine
+        self.scrubber = scrubber
+        self.verifier = verifier
+        self.workspace_root = (workspace_root or Path.cwd()).resolve()
+        self.tool_profiles: dict[str, ToolSecurityProfile] = dict(tool_profiles or {})
+        self.in_flight_requests: dict[int | str, InFlightRequest] = {}
+        self.auto_pin_new: bool = True
+
+    def _get_or_build_profile(self, tool_name: str) -> ToolSecurityProfile:
+        if tool_name in self.tool_profiles:
+            return self.tool_profiles[tool_name]
+        prof = ToxicFlowGraphAnalyzer.build_default_profile(self.server_name, tool_name)
+        self.tool_profiles[tool_name] = prof
+        return prof
+
+    def process_client_to_server(
+        self, msg: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        method = str(msg.get("method") or "")
+        req_id = msg.get("id")
+        params = dict(msg.get("params") or {})
+
+        if method == "tools/call":
+            tool_name = str(params.get("name") or "")
+            arguments = dict(params.get("arguments") or {})
+            profile = self._get_or_build_profile(tool_name)
+
+            try:
+                rehydrated_args = self.scrubber.inspect_and_rehydrate_args(profile.fq_name, arguments)
+            except PermissionError as exc:
+                return None, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"isError": True, "content": [{"type": "text", "text": str(exc)}]},
+                }
+
+            eval_res = self.state_machine.on_tool_call(profile, arguments)
+            if eval_res.effective_decision != GateDecisionType.ALLOW:
+                return None, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "isError": True,
+                        "content": [{"type": "text", "text": f"[MCP-CAGE {eval_res.decision.name}] {eval_res.reason}"}],
+                    },
+                }
+
+            forwarded = dict(msg)
+            forwarded["params"] = {**params, "arguments": rehydrated_args}
+            if req_id is not None:
+                self.in_flight_requests[req_id] = InFlightRequest(
+                    req_id=req_id,
+                    method=method,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    params=params,
+                )
+            return forwarded, None
+
+        if req_id is not None and method:
+            self.in_flight_requests[req_id] = InFlightRequest(
+                req_id=req_id,
+                method=method,
+                params=params,
+            )
+        return msg, None
+
+    def process_server_to_client(
+        self, msg: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """
+        Processes a message from the upstream MCP server -> client.
+        Returns `(message_to_client, error_response_to_server)`.
+        """
+        if "method" in msg:
+            method = str(msg.get("method") or "")
+            if method == "sampling/createMessage":
+                cur_int, cur_conf, _, _ = self.state_machine.get_state()
+                if cur_int < Integrity.TRUSTED or cur_conf >= Confidentiality.CONFIDENTIAL:
+                    return None, {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "error": {
+                            "code": -32001,
+                            "message": (
+                                f"[MCP SAMPLING FIREWALL] [MCP-CAGE BLOCKED SAMPLING HIJACK] "
+                                f"Server '{self.server_name}' denied sampling while session is ({cur_int.name}, {cur_conf.name})."
+                            ),
+                        },
+                    }
+            elif method == "notifications/tools/list_changed":
+                self.auto_pin_new = False
+            return msg, None
+
+        req_id = msg.get("id")
+        in_flight = self.in_flight_requests.pop(req_id, None) if req_id is not None else None
+
+        # Scrub any secrets leaked inside JSON-RPC `error` payloads
+        if "error" in msg and isinstance(msg["error"], Mapping):
+            err_copy = dict(msg["error"])
+            if "message" in err_copy and isinstance(err_copy["message"], str):
+                scrubbed_msg, _ = self.scrubber.scrub_text(err_copy["message"])
+                err_copy["message"] = scrubbed_msg
+            return {**msg, "error": err_copy}, None
+
+        if in_flight is None or "result" not in msg:
+            return msg, None
+
+        result = dict(msg["result"])
+
+        if in_flight.method == "tools/list":
+            tools = result.get("tools") or []
+            sanitized_tools, _ = self.verifier.verify_and_sanitize_tools_list(
+                self.server_name, tools, auto_pin_new=self.auto_pin_new
+            )
+            self.auto_pin_new = False
+            for t in sanitized_tools:
+                t_name = str(t.get("name") or "")
+                if t_name and t_name not in self.tool_profiles:
+                    self.tool_profiles[t_name] = ToxicFlowGraphAnalyzer.build_default_profile(
+                        self.server_name, t_name, str(t.get("description") or "")
+                    )
+            return {**msg, "result": {**result, "tools": sanitized_tools}}, None
+
+        if in_flight.method == "tools/call":
+            profile = self._get_or_build_profile(in_flight.tool_name)
+            raw_str = json.dumps(result, ensure_ascii=False)
+            sanitized_str, _ = WirePayloadSanitizer.sanitize_text(raw_str)
+            scrubbed_str, minted = self.scrubber.scrub_text(sanitized_str)
+            scrubbed_result = json.loads(scrubbed_str)
+
+            # Apply Spotlighting boundary to text content blocks from UNTRUSTED_SOURCE tools
+            if ToolRole.UNTRUSTED_SOURCE in profile.roles and isinstance(scrubbed_result.get("content"), list):
+                new_content = []
+                for item in scrubbed_result["content"]:
+                    if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                        item = {**item, "text": WirePayloadSanitizer.spotlight_untrusted_text(item["text"])}
+                    new_content.append(item)
+                scrubbed_result["content"] = new_content
+
+            self.state_machine.on_tool_response(
+                profile=profile,
+                arguments=in_flight.arguments,
+                response_text=sanitized_str,
+                had_redacted_secrets=bool(minted),
+            )
+            return {**msg, "result": scrubbed_result}, None
+
+        if in_flight.method == "resources/read":
+            uri = str(in_flight.params.get("uri") or "")
+            raw_str = json.dumps(result, ensure_ascii=False)
+            sanitized_str, _ = WirePayloadSanitizer.sanitize_text(raw_str)
+            scrubbed_str, minted = self.scrubber.scrub_text(sanitized_str)
+            scrubbed_result = json.loads(scrubbed_str)
+
+            res_profile = ToolSecurityProfile(
+                server=self.server_name,
+                tool_name="resources/read",
+                roles=frozenset({ToolRole.PRIVATE_SOURCE}),
+                source_taint_resolver=filesystem_read_taint_resolver,
+            )
+            self.state_machine.on_tool_response(
+                profile=res_profile,
+                arguments={"path": uri},
+                response_text=sanitized_str,
+                had_redacted_secrets=bool(minted),
+            )
+            return {**msg, "result": scrubbed_result}, None
+
+        return msg, None
+
+    async def run_stdio_proxy(
+        self,
+        cmd: list[str],
+        client_reader: asyncio.StreamReader,
+        client_writer: Any,
+    ) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+
+        while True:
+            line = await client_reader.readline()
+            if not line:
+                break
+            req = json.loads(line.decode("utf-8"))
+            fwd, imm = self.process_client_to_server(req)
+            if imm is not None:
+                client_writer.write((json.dumps(imm) + "\n").encode("utf-8"))
+                continue
+            if fwd is not None:
+                proc.stdin.write((json.dumps(fwd) + "\n").encode("utf-8"))
+                await proc.stdin.drain()
+                srv_line = await proc.stdout.readline()
+                if not srv_line:
+                    break
+                srv_msg = json.loads(srv_line.decode("utf-8"))
+                out_client, err_srv = self.process_server_to_client(srv_msg)
+                if err_srv is not None:
+                    proc.stdin.write((json.dumps(err_srv) + "\n").encode("utf-8"))
+                    await proc.stdin.drain()
+                if out_client is not None:
+                    client_writer.write((json.dumps(out_client) + "\n").encode("utf-8"))
+
+        proc.stdin.close()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            proc.terminate()
+
+
+# -----------------------------------------------------------------------------
+# Plane B: Universal Native Lifecycle Hook Handler (`claude`, `cursor`, `gemini`, `agy`, `codex`)
+# -----------------------------------------------------------------------------
+
+def _build_native_hook_profile(
+    tool_name: str, tool_input: Mapping[str, Any], workspace_root: Path
+) -> ToolSecurityProfile:
+    low = tool_name.lower()
+
+    # 1. File Read tools
+    if low in {"read", "read_file", "view_file", "beforereadfile"}:
+        return ToolSecurityProfile(
+            server="native",
+            tool_name=tool_name,
+            roles=frozenset({ToolRole.PRIVATE_SOURCE}),
+            source_taint_resolver=filesystem_read_taint_resolver,
+            arg_guard=make_workspace_path_guard(workspace_root, is_write=False),
+        )
+
+    # 2. File Write / Edit tools
+    if low in {"write", "edit", "multi_edit", "write_file", "edit_file", "replace_file_content"}:
+        return ToolSecurityProfile(
+            server="native",
+            tool_name=tool_name,
+            roles=frozenset({ToolRole.WORKSPACE_MUTATOR}),
+            min_required_integrity=Integrity.UNTRUSTED,
+            arg_guard=make_workspace_path_guard(workspace_root, is_write=True),
+        )
+
+    # 3. Web Fetch / Search tools (Both Untrusted Source & External Egress Sink)
+    if low in {"webfetch", "websearch", "fetch", "fetch_url", "read_url_content", "search_web"}:
+        return ToolSecurityProfile(
+            server="native",
+            tool_name=tool_name,
+            roles=frozenset({ToolRole.UNTRUSTED_SOURCE, ToolRole.EXTERNAL_EGRESS_SINK}),
+            source_integrity=Integrity.UNTRUSTED,
+            min_required_integrity=Integrity.TRUSTED,
+            max_allowed_confidentiality=Confidentiality.PUBLIC,
+            arg_guard=make_ssrf_and_dns_guard(),
+        )
+
+    # 4. Shell / Command execution tools (`Bash`, `run_command`, `run_shell_command`)
+    if low in {"bash", "run_command", "run_shell_command", "beforeshellexecution"}:
+        cmd_str = str(
+            tool_input.get("command")
+            or tool_input.get("CommandLine")
+            or tool_input.get("cmd")
+            or ""
+        )
+        has_network_egress = bool(
+            re.search(r"(?i)\b(curl|wget|nc|ncat|netcat|scp|ssh|rsync|nslookup|dig|ping|gh\s+pr|git\s+push)\b", cmd_str)
+        )
+        roles = (
+            frozenset({ToolRole.PRIVILEGED_MUTATOR, ToolRole.EXTERNAL_EGRESS_SINK})
+            if has_network_egress
+            else frozenset({ToolRole.PRIVILEGED_MUTATOR})
+        )
+        return ToolSecurityProfile(
+            server="native",
+            tool_name=tool_name,
+            roles=roles,
+            min_required_integrity=Integrity.ENDORSED,
+            max_allowed_confidentiality=Confidentiality.PUBLIC if has_network_egress else Confidentiality.SECRET,
+            arg_guard=make_ssrf_and_dns_guard() if has_network_egress else None,
+        )
+
+    return ToxicFlowGraphAnalyzer.build_default_profile("native", tool_name)
+
+
+def handle_cli_hook(
+    agent: str,
+    event: str,
+    payload: Mapping[str, Any],
+    *,
+    db_path: Path,
+    workspace_root: Path,
+) -> dict[str, Any]:
+    """
+    Universal Plane B lifecycle hook handler for:
+    - Claude Code (`claude`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`
+    - Cursor (`cursor`): `beforeReadFile`, `beforeShellExecution`, `beforeMCPExecution`, `afterMCPExecution`
+    - Gemini CLI (`gemini`): `BeforeTool`, `AfterTool`, `SessionStart`
+    - Google Antigravity (`agy`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`
+    - OpenAI Codex CLI (`codex`): `PreToolUse`, `PostToolUse`, `UserPromptSubmit`
+    """
+    agent_low = agent.lower()
+    event_low = event.lower()
+    session_id = str(payload.get("session_id") or payload.get("conversation_id") or "default")
+    sm = SessionTaintStateMachine(db_path=db_path, session_id=session_id)
+    scrubber = BidirectionalSecretScrubber(db_path=db_path)
+
+    # 1. User Prompt Turn Reset events
+    if event_low in {"userpromptsubmit", "beforesubmitprompt", "sessionstart"}:
+        sm.reset_turn_integrity(f"{agent}:{event}")
+        return {"continue": True, "decision": "allow", "permission": "allow"}
+
+    # Normalize tool_name and tool_input across agent hook schemas
+    tool_name = str(payload.get("tool_name") or event)
+    tool_input: dict[str, Any] = dict(payload.get("tool_input") or {})
+    if not tool_input:
+        for k in ("file_path", "path", "command", "CommandLine", "url"):
+            if k in payload:
+                tool_input["path" if k == "file_path" else k] = payload[k]
+
+    profile = _build_native_hook_profile(tool_name, tool_input, workspace_root)
+
+    # 2. Cursor `beforeReadFile` pre-taints session if reading sensitive `.env` / credentials
+    if event_low == "beforereadfile":
+        eval_res = sm.on_tool_call(profile, tool_input)
+        if eval_res.decision == GateDecisionType.DENY:
+            return {"permission": "deny", "user_message": eval_res.human_summary}
+        sm.on_tool_response(profile, tool_input, response_text="", had_redacted_secrets=False)
+        return {"permission": "allow"}
+
+    # 3. Post-Tool Response hooks (`PostToolUse`, `AfterTool`, `afterMCPExecution`)
+    if event_low in {"posttooluse", "aftertool", "aftermcpexecution"}:
+        raw_resp = str(payload.get("tool_response") or payload.get("output") or "")
+        sanitized_resp, _ = WirePayloadSanitizer.sanitize_text(raw_resp)
+        scrubbed_resp, minted = scrubber.scrub_text(sanitized_resp)
+        sm.on_tool_response(
+            profile=profile,
+            arguments=tool_input,
+            response_text=sanitized_resp,
+            had_redacted_secrets=bool(minted),
+        )
+        spotlighted = (
+            WirePayloadSanitizer.spotlight_untrusted_text(scrubbed_resp)
+            if ToolRole.UNTRUSTED_SOURCE in profile.roles
+            else scrubbed_resp
+        )
+        return {
+            "continue": True,
+            "decision": "allow",
+            "spotlighted_output": spotlighted,
+        }
+
+    # 4. Pre-Tool Execution Gate (`PreToolUse`, `BeforeTool`, `beforeShellExecution`, `beforeMCPExecution`)
+    try:
+        scrubber.inspect_and_rehydrate_args(profile.fq_name, tool_input)
+    except PermissionError as exc:
+        eval_res = GateEvaluation(
+            decision=GateDecisionType.DENY,
+            effective_decision=GateDecisionType.DENY,
+            mode=sm.mode,
+            reason=str(exc),
+            human_summary=str(exc),
+        )
+    else:
+        eval_res = sm.on_tool_call(profile, tool_input)
+
+    if agent_low == "agy":
+        agy_map = {
+            GateDecisionType.ALLOW: "allow",
+            GateDecisionType.STEP_UP: "force_ask",
+            GateDecisionType.DENY: "deny",
+        }
+        return {"decision": agy_map[eval_res.decision], "reason": eval_res.reason}
+
+    if agent_low == "cursor":
+        cur_map = {
+            GateDecisionType.ALLOW: "allow",
+            GateDecisionType.STEP_UP: "ask",
+            GateDecisionType.DENY: "deny",
+        }
+        return {"permission": cur_map[eval_res.decision], "user_message": eval_res.human_summary}
+
+    if agent_low == "gemini":
+        gem_map = {
+            GateDecisionType.ALLOW: "allow",
+            GateDecisionType.STEP_UP: "ask",
+            GateDecisionType.DENY: "deny",
+        }
+        return {"decision": gem_map[eval_res.decision], "reason": eval_res.reason}
+
+    # Default Claude Code / Codex format
+    claude_map = {
+        GateDecisionType.ALLOW: "allow",
+        GateDecisionType.STEP_UP: "ask",
+        GateDecisionType.DENY: "deny",
+    }
+    return {
+        "decision": claude_map[eval_res.decision],
+        "reason": eval_res.reason,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": claude_map[eval_res.decision],
+            "permissionDecisionReason": eval_res.human_summary,
+        },
+    }
+
+
+# -----------------------------------------------------------------------------
+# Unified CLI Entrypoint (`mcp-cage` & `mcp-sploit`)
+# -----------------------------------------------------------------------------
+
+DEFAULT_AUDIT_CATALOG: dict[str, list[dict[str, Any]]] = {
+    "filesystem": [
+        {"name": "read_file", "description": "Read file from workspace."},
+        {"name": "write_file", "description": "Write file to workspace.", "annotations": {"destructiveHint": True}},
+    ],
+    "github": [
+        {"name": "get_issue", "description": "Read GitHub issue.", "annotations": {"readOnlyHint": True, "openWorldHint": True}},
+        {"name": "create_issue_comment", "description": "Post comment on issue.", "annotations": {"readOnlyHint": False, "openWorldHint": True}},
+    ],
+    "fetch": [
+        {"name": "fetch_url", "description": "Fetch a URL over HTTP/HTTPS."},
+    ],
+    "slack": [
+        {"name": "post_message", "description": "Send message to Slack channel."},
+    ],
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mcp-cage",
+        description="Zero-Code Wire & Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI & MCP",
+    )
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    # 1. `status`
+    p_status = sub.add_parser("status", help="Inspect current session taint & provenance state")
+    p_status.add_argument("--db", default=".mcp-cage/taint.db", help="Path to SQLite state DB")
+    p_status.add_argument("--session", default="default", help="Session ID")
+
+    # 2. `reset`
+    p_reset = sub.add_parser("reset", help="Reset turn integrity to TRUSTED or clear session")
+    p_reset.add_argument("--db", default=".mcp-cage/taint.db", help="Path to SQLite state DB")
+    p_reset.add_argument("--session", default="default", help="Session ID")
+
+    # 3. `audit` (`mcp-sploit` toxic-flow graph analyzer)
+    p_audit = sub.add_parser("audit", help="Run mcp-sploit Lethal Trifecta toxic-flow graph audit")
+    p_audit.add_argument("--catalog", help="Optional JSON file mapping server->tools")
+
+    # 4. `audit-config` (Primitive B: CurXecute / MCPoison config linter)
+    p_cfg = sub.add_parser(
+        "audit-config",
+        help="Audit .mcp.json / .cursor/mcp.json / .vscode/mcp.json / claude_desktop_config.json for CurXecute RCE & secrets",
+    )
+    p_cfg.add_argument("paths", nargs="*", help="Config files to audit (auto-discovers workspace configs if omitted)")
+    p_cfg.add_argument("--workspace", default=".", help="Workspace root directory")
+
+    # 5. `hook` (Plane B native lifecycle hook handler)
+    p_hook = sub.add_parser("hook", help="Handle native agent lifecycle hook from stdin JSON")
+    p_hook.add_argument("agent", choices=["claude", "cursor", "gemini", "agy", "codex"])
+    p_hook.add_argument("event", help="Hook event name (e.g. PreToolUse, PostToolUse, BeforeTool, beforeReadFile)")
+    p_hook.add_argument("--db", default=".mcp-cage/taint.db", help="Path to SQLite state DB")
+    p_hook.add_argument("--workspace", default=".", help="Workspace root directory")
+
+    # 6. `wrap` (Plane A stdio MCP wrapper)
+    p_wrap = sub.add_parser("wrap", help="Wrap an upstream stdio MCP server with mcp-cage wire enforcement")
+    p_wrap.add_argument("--server", required=True, help="Logical server name (e.g., filesystem, github, slack)")
+    p_wrap.add_argument("--workspace", default=".", help="Workspace root directory")
+    p_wrap.add_argument("--state-dir", default=".mcp-cage", help="Directory for shared SQLite state, vault & audit.jsonl")
+    p_wrap.add_argument("--session-id", default="default", help="Session identifier")
+    p_wrap.add_argument("--mode", choices=["enforce", "shadow"], default="enforce")
+    p_wrap.add_argument(
+        "--step-up-policy",
+        choices=["deny", "approve_once", "lease_mutator_5m", "endorse_context"],
+        default="deny",
+    )
+    p_wrap.add_argument("upstream_cmd", nargs=argparse.REMAINDER, help="Command and args after '--'")
+
+    args = parser.parse_args(argv)
+
+    if args.subcommand == "status":
+        sm = SessionTaintStateMachine(Path(args.db), session_id=args.session)
+        cur_int, cur_conf, prov, leases = sm.get_state()
+        print(
+            json.dumps(
+                {
+                    "session_id": args.session,
+                    "integrity": cur_int.name,
+                    "confidentiality": cur_conf.name,
+                    "provenance": prov,
+                    "leases": leases,
+                    "untrusted_entities": sm.get_untrusted_entities(),
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.subcommand == "reset":
+        sm = SessionTaintStateMachine(Path(args.db), session_id=args.session)
+        new_int, cur_conf = sm.reset_turn_integrity("CLI reset")
+        print(json.dumps({"session_id": args.session, "integrity": new_int.name, "confidentiality": cur_conf.name}))
+        return 0
+
+    if args.subcommand == "audit":
+        catalog = (
+            json.loads(Path(args.catalog).read_text())
+            if args.catalog
+            else DEFAULT_AUDIT_CATALOG
+        )
+        classified, findings = ToxicFlowGraphAnalyzer.audit_mcp_tools(catalog)
+        print(
+            json.dumps(
+                {
+                    "classified": classified,
+                    "findings": [f.__dict__ for f in findings],
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.subcommand == "audit-config":
+        explicit = [Path(p) for p in args.paths] if args.paths else None
+        report = WorkspaceMCPConfigAuditor.discover_and_audit(Path(args.workspace), explicit)
+        print(json.dumps(report, indent=2))
+        return 1 if report["summary"]["CRITICAL"] > 0 else 0
+
+    if args.subcommand == "hook":
+        raw_in = sys.stdin.read().strip()
+        payload = json.loads(raw_in) if raw_in else {}
+        resp = handle_cli_hook(
+            args.agent,
+            args.event,
+            payload,
+            db_path=Path(args.db),
+            workspace_root=Path(args.workspace),
+        )
+        print(json.dumps(resp))
+        return 0
+
+    if args.subcommand == "wrap":
+        from mcp_cage_cli import run_stdio_wrapper
+
+        return run_stdio_wrapper(args)
+
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
