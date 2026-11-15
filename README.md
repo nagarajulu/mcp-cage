@@ -3,10 +3,16 @@
 **Zero-Code Wire & Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI & MCP**  
 *("Gitleaks + Little Snitch for AI Coding Agents" — 100% Python 3.10+ Standard Library, Zero External Dependencies)*
 
+[![Live Interactive Web Showcase](https://img.shields.io/badge/🌐%20Live%20Interactive%20Sandbox-nagarajulu.github.io%2Fmcp--cage-06b6d4?style=for-the-badge)](https://nagarajulu.github.io/mcp-cage/)
+
 [![CI — mcp-cage Security Suite](https://github.com/nagarajulu/mcp-cage/actions/workflows/ci.yml/badge.svg)](https://github.com/nagarajulu/mcp-cage/actions/workflows/ci.yml)
+[![Interactive Web Demo](https://img.shields.io/badge/Interactive%20Demo-Live%20Exploit%20%26%20Config%20Sandbox-3b82f6.svg)](https://nagarajulu.github.io/mcp-cage/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](pyproject.toml)
 [![Dependencies: Zero](https://img.shields.io/badge/dependencies-zero%20(100%25%20stdlib)-success.svg)](pyproject.toml)
+
+> 🚀 **Try the Live Interactive Web Sandbox in Your Browser:** [**`https://nagarajulu.github.io/mcp-cage/`**](https://nagarajulu.github.io/mcp-cage/)  
+> Explore the **5 Integration Modes** (`wrap`, `hook`, `shell`, Python SDK, `mcp-sploit`), inspect the **8-Plane Security Feature Matrix**, replay **V1 Failure vs. V0.2.2 Blocked Exploits** on the live $(P \times U \Rightarrow S)$ graph, and generate copy-paste configs for **Claude Code, Cursor, Gemini CLI, Antigravity (`agy`), Codex, Claude Desktop, and LangGraph**.
 
 ---
 
@@ -204,7 +210,7 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 | [`demo_interactive.py`](demo_interactive.py) | 5-Act interactive terminal walkthrough demonstrating every defense end-to-end. |
 | [`test_mcp_cage_v21.py`](test_mcp_cage_v21.py) | Comprehensive V2.2 unit & integration test suite (10 test suites including SSRF/DNS exfil & `CurXecute` config auditing). |
 | [`test_e2e_all_8_planes.py`](test_e2e_all_8_planes.py) | 8-Plane End-to-End security test suite (17 tests across cognitive, protocol, trifecta, parameter, memory, and subprocess planes). |
-| [`visualizer.html`](visualizer.html) | Interactive browser-based architecture & attack-plane visualizer. |
+| [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, V1 vs. V0.2.2 Exploit Simulator, Config Generator & 1966–2026 Research Lineage ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
 
 ---
 
