@@ -553,9 +553,17 @@ class StandardArgGuards:
     SQL_CLAUSE_INJECTION_RE = re.compile(
         r"(?i)\b(UNION|SELECT|SLEEP|BENCHMARK|LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b|\bOR\s+(?:1\s*=\s*1|TRUE|'[^']*'\s*=\s*'[^']*')\b"
     )
+    SQL_VALUE_INJECTION_RE = re.compile(
+        r"(?i)(?:;\s*(?:SELECT|DROP|DELETE|INSERT|UPDATE|COPY|ATTACH|CREATE|ALTER)\b|"
+        r"'(?:\s*(?:OR|AND)\s+(?:\d+\s*=\s*\d+|TRUE|'[^']*'\s*=\s*'[^']*')|\s+UNION\b|\s*;|\s*--|\s*/\*)|"
+        r"\bUNION\s+(?:ALL\s+)?SELECT\b|\bread_(?:text|csv|csv_auto|parquet|json|blob)\s*\()"
+    )
     URL_PATH_TRAVERSAL_RE = re.compile(r"(?i)(?:\.\.|[/\\?#]|%2e|%2f|%5c|%3f|%23)")
     URL_PATH_STATIC_KEYS = frozenset(
         {
+            "id",
+            "resourcetype",
+            "resource_type",
             "scriptname",
             "script_name",
             "job_id",
@@ -802,6 +810,15 @@ class StandardArgGuards:
                 match = cls.DESTRUCTIVE_SQL_RE.search(candidate)
                 if match:
                     return False, f"Forbidden SQL keyword '{match.group(1)}' blocked in '{key}' (A4.3)."
+
+        for key, val in kv_pairs:
+            low_k = key.lower()
+            if low_k in {"statement", "sql", "sql_query", "query", "where_clause", "order_by", "filter", "having", "sort_by", "group_by"}:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                continue
+            if cls.SQL_VALUE_INJECTION_RE.search(val):
+                return False, f"SQL filter value injection blocked in '{key}' (A4.3/CWE-89): '{val[:80]}'."
         return True, "OK"
 
     @classmethod
@@ -1814,20 +1831,20 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
-        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result)(?:$|[._])"
+        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
-        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|semantic_view|run_query|execute_query|db_query|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
+        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|execute_query|db_query|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
     )
     NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
     WORKSPACE_FILE_TOOL_RE = re.compile(
