@@ -584,7 +584,15 @@ class StandardArgGuards:
             "namespace",
             "cluster",
             "instance",
+            "domain",
+            "ip_or_domain",
         }
+    )
+    REST_RELATIVE_PATH_TOOL_RE = re.compile(
+        r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute)(?:$|[._])"
+    )
+    REST_RELATIVE_PATH_UNSAFE_RE = re.compile(
+        r"(?i)(?:^|[\\/])\.\.(?:$|[\\/])|://|^//|[\r\n\x00\\@]|%2e%2e|%5c"
     )
     CLI_FLAG_STATIC_KEYS = frozenset(
         {
@@ -695,7 +703,7 @@ class StandardArgGuards:
     def _is_resource_id_key(cls, key: str) -> bool:
         low = key.lower()
         return (
-            key.endswith(("_id", "Id", "_name", "Name"))
+            key.endswith(("_id", "_ids", "Id", "Ids", "_name", "Name"))
             or low in cls.URL_PATH_STATIC_KEYS
         )
 
@@ -839,6 +847,23 @@ class StandardArgGuards:
                             False,
                             f"URL path-segment traversal / delimiter blocked in '{key}' (CWE-22): '{item}'.",
                         )
+        return True, "OK"
+
+    @classmethod
+    def rest_relative_path_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks `..` dot-segments, schemes (`://`), `//`, `@`, and control chars in relative REST API paths."""
+        for key in ("path", "action"):
+            val = args.get(key)
+            if not isinstance(val, str) or not val:
+                continue
+            decoded_once = urllib.parse.unquote(val)
+            decoded_twice = urllib.parse.unquote(decoded_once)
+            for candidate in (val, decoded_once, decoded_twice):
+                if cls.REST_RELATIVE_PATH_UNSAFE_RE.search(candidate):
+                    return (
+                        False,
+                        f"Relative REST path traversal / scheme smuggling blocked in '{key}' (CWE-22): '{val}'.",
+                    )
         return True, "OK"
 
     @classmethod
@@ -1834,10 +1859,10 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
-        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch)(?:$|[._])"
+        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
         r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
@@ -1918,6 +1943,8 @@ class ToxicFlowGraphAnalyzer:
             StandardArgGuards.cli_flag_injection_guard,
             StandardArgGuards.url_path_segment_guard,
         ]
+        if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
+            guards.append(StandardArgGuards.rest_relative_path_guard)
         if is_egress:
             guards.append(make_ssrf_and_dns_guard(allow_private_hosts=set(trusted_endpoints) if trusted_endpoints else None))
 
