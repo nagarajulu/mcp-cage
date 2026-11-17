@@ -189,9 +189,20 @@ def build_default_profiles(server_name: str, workspace_root: Path) -> dict[str, 
 class DynamicProfileAwareProxy(MCPJsonRpcProxy):
     """
     Extends `MCPJsonRpcProxy` so any previously unseen tool returned in `tools/list`
-    is automatically classified by `ToxicFlowGraphAnalyzer.classify_tool` and given
-    an appropriate `ToolSecurityProfile` if not already explicitly configured.
+    or called dynamically is automatically classified by `ToxicFlowGraphAnalyzer.build_default_profile`
+    with full v0.3.0 empirical wire-level guards.
     """
+
+    def __init__(self, *args: Any, workspace_root: Path | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.workspace_root = (workspace_root or Path.cwd()).resolve()
+
+    def _default_profile(self, tool_name: str) -> ToolSecurityProfile:
+        return ToxicFlowGraphAnalyzer.build_default_profile(
+            self.server_name,
+            tool_name,
+            workspace_root=self.workspace_root,
+        )
 
     def handle_server_to_client(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         req_id = msg.get("id")
@@ -203,29 +214,11 @@ class DynamicProfileAwareProxy(MCPJsonRpcProxy):
             for t in out["result"].get("tools", []):
                 t_name = t.get("name", "")
                 if t_name and t_name not in self.tool_profiles:
-                    roles = frozenset(ToxicFlowGraphAnalyzer.classify_tool(self.server_name, t))
-                    min_int = (
-                        Integrity.TRUSTED
-                        if (ToolRole.PRIVILEGED_MUTATOR in roles or ToolRole.EXTERNAL_EGRESS_SINK in roles)
-                        else Integrity.UNTRUSTED
-                    )
-                    max_conf = (
-                        Confidentiality.PUBLIC
-                        if ToolRole.EXTERNAL_EGRESS_SINK in roles
-                        else Confidentiality.SECRET
-                    )
-                    self.tool_profiles[t_name] = ToolSecurityProfile(
-                        server=self.server_name,
-                        tool_name=t_name,
-                        roles=roles,
-                        source_integrity=(
-                            Integrity.UNTRUSTED if ToolRole.UNTRUSTED_SOURCE in roles else Integrity.TRUSTED
-                        ),
-                        source_confidentiality=(
-                            Confidentiality.CONFIDENTIAL if ToolRole.PRIVATE_SOURCE in roles else Confidentiality.PUBLIC
-                        ),
-                        min_required_integrity=min_int,
-                        max_allowed_confidentiality=max_conf,
+                    self.tool_profiles[t_name] = ToxicFlowGraphAnalyzer.build_default_profile(
+                        self.server_name,
+                        t_name,
+                        str(t.get("description") or ""),
+                        workspace_root=self.workspace_root,
                     )
         return out
 
@@ -266,6 +259,7 @@ def run_stdio_wrapper(args: argparse.Namespace) -> int:
         tool_profiles=profiles,
         step_up_callback=lambda _t, _a, _e: default_step_up,
         auto_pin_on_first_list=True,
+        workspace_root=workspace_root,
     )
 
     upstream_cmd = list(args.upstream_cmd)

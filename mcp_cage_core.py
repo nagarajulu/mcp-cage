@@ -1,7 +1,7 @@
 """
 Core engine for `mcp-cage` (Zero-Code Wire & Native-Hook Security Firewall) & `mcp-sploit` (Toxic-Flow & Config Scanner).
 
-V2.2 / V3 Unified Architecture:
+v0.3.0 Empirical Co-Design Architecture (`v0.1.0` -> `v0.2.2` -> `v0.3.0`):
 1. Cross-Process SQLite-Backed `BidirectionalSecretScrubber`:
    - Stores redacted secret tokens (`<MCP_REDACTED_...>`) in SQLite WAL so separate OS processes
      (`filesystem` vs `slack` vs `github`) share the same token vault without collisions or amnesia.
@@ -20,12 +20,20 @@ V2.2 / V3 Unified Architecture:
    - Audits `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and `claude_desktop_config.json` for
      relative-path binary execution, shell wrappers, command chaining, hardcoded plaintext secrets,
      and unwrapped MCP servers.
-5. Universal Dual-Plane Enforcement:
-   - Plane A (MCP Wire Gateway): `MCPWireGateway` & `MCPJsonRpcProxy` for stdio MCP servers.
+5. v0.3.0 Empirical Wire-Level Security Guards (Generalizing Real-World MCP Audit Findings):
+   - Runtime Endpoint & Session Re-pointing Guard (`endpoint_repoint_guard` — `GHSA-rvjm-7hvp-f868`).
+   - Embedded POSIX Command Substitution Guard in File/Folder Paths (`path_command_substitution_guard` + `make_workspace_path_guard`).
+   - REST URL Path-Segment Traversal Guard (`url_path_segment_guard`).
+   - CLI Positional-Argument Flag Injection Guard (`cli_flag_injection_guard`).
+   - Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard`).
+6. Universal Dual-Plane Enforcement:
+   - Plane A (MCP Wire Gateway): `MCPWireGateway` (`MCPCageEngine`) & `MCPJsonRpcProxy` for stdio MCP servers.
    - Plane B (Native Agent Lifecycle Hooks): `mcp-cage hook <claude|cursor|gemini|agy|codex>` for built-in tools.
 """
 
 from __future__ import annotations
+
+__version__ = "0.3.0"
 
 import argparse
 import asyncio
@@ -152,14 +160,64 @@ PROTECTED_DOTFILE_WRITE_PATTERNS = re.compile(
 )
 
 
+WORKSPACE_PATH_KEYS: tuple[str, ...] = (
+    "path",
+    "file_path",
+    "filePath",
+    "target_file",
+    "targetFile",
+    "folderPath",
+    "folder_path",
+    "source_dir",
+    "sourceDir",
+    "app_dir",
+    "appDir",
+    "working_directory",
+    "workingDirectory",
+    "download_directory",
+    "downloadDirectory",
+    "destination",
+    "dest",
+    "directory",
+    "dir",
+    "cwd",
+    "root_dir",
+    "output_path",
+    "outputPath",
+    "input_path",
+    "inputPath",
+)
+LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
+    {
+        "folderpath",
+        "folder_path",
+        "source_dir",
+        "sourcedir",
+        "app_dir",
+        "appdir",
+        "working_directory",
+        "workingdirectory",
+        "download_directory",
+        "downloaddirectory",
+    }
+)
+POSIX_CMD_SUBST_RE = re.compile(r"\$\(|`|\$\{|\x00")
+
+
 def is_safe_workspace_path(raw_path: str | Path, workspace_root: Path, *, is_write: bool = True) -> tuple[bool, str]:
     """
-    Verifies that `raw_path` resolves strictly inside `workspace_root` (blocking `../`, `~`,
-    and symlink escapes) and does not modify protected dotfiles or agent configuration files.
+    Verifies that `raw_path` contains no embedded POSIX command substitution (`$(...)`, backticks),
+    resolves strictly inside `workspace_root` (blocking `../`, `~`, and symlink escapes),
+    and does not modify protected dotfiles or agent configuration files.
     """
     path_str = str(raw_path).strip()
     if not path_str:
         return False, "Missing file path parameter."
+    if POSIX_CMD_SUBST_RE.search(path_str):
+        return (
+            False,
+            f"Embedded POSIX command substitution / shell expansion blocked in path (CWE-78): '{path_str}'.",
+        )
     if path_str.startswith("~"):
         return False, f"Home directory path expansion blocked (A4.2): '{path_str}'."
 
@@ -187,12 +245,42 @@ def is_safe_workspace_path(raw_path: str | Path, workspace_root: Path, *, is_wri
     return True, "OK"
 
 
+def _collect_workspace_paths(args: Mapping[str, Any]) -> list[str]:
+    candidates: list[Mapping[str, Any]] = [args]
+    nested = args.get("args")
+    if isinstance(nested, Mapping):
+        candidates.append(nested)
+    nested_params = args.get("params")
+    if isinstance(nested_params, Mapping):
+        candidates.append(nested_params)
+
+    found: list[str] = []
+    for src in candidates:
+        for key in WORKSPACE_PATH_KEYS:
+            val = src.get(key)
+            if isinstance(val, str) and val.strip():
+                found.append(val)
+        for list_key in ("paths", "files", "folders", "directories"):
+            list_val = src.get(list_key)
+            if isinstance(list_val, (list, tuple)):
+                for item in list_val:
+                    if isinstance(item, str) and item.strip():
+                        found.append(item)
+    return found
+
+
 def make_workspace_path_guard(
     workspace_root: Path, *, is_write: bool = True
 ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
     def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
-        raw_path = str(args.get("path") or args.get("file_path") or args.get("target_file") or "")
-        return is_safe_workspace_path(raw_path, workspace_root, is_write=is_write)
+        paths = _collect_workspace_paths(args)
+        if not paths:
+            return is_safe_workspace_path("", workspace_root, is_write=is_write)
+        for raw_path in paths:
+            ok, reason = is_safe_workspace_path(raw_path, workspace_root, is_write=is_write)
+            if not ok:
+                return False, reason
+        return True, "OK"
 
     return _guard
 
@@ -443,20 +531,191 @@ class WirePayloadSanitizer:
 
 class StandardArgGuards:
     """
-    Built-in deterministic parameter guards (`arg_guard`) for Planes 3, 4, and 8:
+    Built-in deterministic parameter guards (`arg_guard`) for Planes 3, 4, and 8 and v0.3.0 empirical guards:
     - A3.3 / A3.4: Blocks writes to `.git/hooks/`, `.vscode/settings.json` (Copilot YOLO mode), `.cursor/mcp.json` (CurXecute).
-    - A4.1: Blocks shell metacharacters (`;`, `|`, `&&`, `$()`, backticks) on non-shell parameters.
+    - A4.1 & CWE-78: Blocks shell metacharacters (`;`, `|`, `&&`, `$()`, backticks) and embedded POSIX command substitution in paths.
     - A4.2: Resolves symlinks (`Path.resolve()`) and blocks path traversal outside `workspace_root`.
-    - A4.3 / A8.1: Blocks destructive SQL keywords (`DROP`, `DELETE`, `TRUNCATE`, `ALTER`, `COPY`, `pg_read_file`).
+    - A4.3 / A8.1: Multi-statement & clause-level SQL AST guard (`where_clause`, `order_by`, `filter`, comment stripping).
     - A4.4: Blocks SSRF requests to cloud metadata (`169.254.169.254`), localhost (`127.0.0.1`), RFC1918 IPs,
       dangerous URI schemes (`file://`, `gopher://`), and high-entropy DNS exfiltration subdomains.
+    - GHSA-rvjm-7hvp-f868: Runtime endpoint & session re-pointing guard (`endpoint_repoint_guard`).
+    - CWE-22 REST URL path-segment traversal guard (`url_path_segment_guard`).
+    - CWE-88 CLI positional-argument flag injection guard (`cli_flag_injection_guard`).
     - A8.2: Enforces financial transaction / refund dollar caps.
     """
 
     SHELL_METACHAR_RE = re.compile(r"[;|&`$><]|\$\(")
     DESTRUCTIVE_SQL_RE = re.compile(
-        r"(?i)\b(DROP|DELETE|TRUNCATE|ALTER|GRANT|COPY|pg_read_file|lo_import|lo_export|dblink)\b"
+        r"(?i)\b(DROP|DELETE|TRUNCATE|ALTER|GRANT|REVOKE|COPY|INSERT|UPDATE|MERGE|CREATE|EXECUTE\s+IMMEDIATE|CALL|INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE|LOAD\s+DATA|pg_read_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|dblink|xp_cmdshell)\b"
     )
+    SQL_COMMENT_RE = re.compile(r"--[^\n]*|/\*[\s\S]*?\*/")
+    SQL_SINGLE_QUOTED_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'")
+    SQL_CLAUSE_INJECTION_RE = re.compile(
+        r"(?i)\b(UNION|SELECT|SLEEP|BENCHMARK|LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b|\bOR\s+(?:1\s*=\s*1|TRUE|'[^']*'\s*=\s*'[^']*')\b"
+    )
+    URL_PATH_TRAVERSAL_RE = re.compile(r"(?i)(?:\.\.|[/\\?#]|%2e|%2f|%5c|%3f|%23)")
+    URL_PATH_STATIC_KEYS = frozenset(
+        {
+            "scriptname",
+            "script_name",
+            "job_id",
+            "session_id",
+            "rag_id",
+            "account_id",
+            "deviceid",
+            "commandid",
+            "gateway_id",
+            "log_id",
+            "bucket",
+            "repo",
+            "owner",
+            "org",
+            "organization",
+            "zone",
+            "worker",
+            "namespace",
+            "cluster",
+            "instance",
+        }
+    )
+    CLI_FLAG_STATIC_KEYS = frozenset(
+        {
+            "node",
+            "pod",
+            "namespace",
+            "deployment",
+            "container",
+            "cluster",
+            "context",
+            "resource",
+            "kind",
+            "service",
+            "project",
+            "region",
+            "zone",
+            "location",
+            "destination",
+            "dest",
+            "download_directory",
+            "folderpath",
+            "folder_path",
+            "source_dir",
+            "app_dir",
+            "working_directory",
+            "directory",
+            "dir",
+            "path",
+            "file_path",
+            "filepath",
+            "target",
+            "target_file",
+            "repo",
+            "repo_url",
+            "remote",
+            "branch",
+            "ref",
+            "tag",
+            "commit",
+            "chart",
+            "release",
+            "name",
+            "bucket",
+            "object",
+            "url",
+            "uri",
+            "scriptname",
+            "script_name",
+        }
+    )
+    CLI_EMBEDDED_FLAG_RE = re.compile(r"\s--[a-zA-Z0-9][a-zA-Z0-9_-]*")
+    ENDPOINT_REPOINT_TOOL_RE = re.compile(
+        r"(?i)(?:^|[._])(connect_to_[a-z0-9_]+|switch_server|set_endpoint|configure_connection|set_connection|set_server_url|update_endpoint|change_endpoint|bind_endpoint|reconnect(?:_[a-z0-9_]+)?)(?:$|[._])"
+    )
+    ENDPOINT_URL_KEYS = frozenset(
+        {
+            "url",
+            "endpoint",
+            "endpoint_url",
+            "server_url",
+            "base_url",
+            "runtime_url",
+            "document_url",
+            "jupyter_url",
+            "connection_url",
+            "target_url",
+            "remote_url",
+            "api_url",
+            "host",
+            "provider",
+        }
+    )
+    ENDPOINT_TOKEN_KEYS = frozenset(
+        {
+            "token",
+            "api_key",
+            "auth_token",
+            "bearer_token",
+            "access_token",
+            "jupyter_token",
+            "runtime_token",
+            "document_token",
+            "authorization",
+            "auth_header",
+            "secret",
+            "password",
+        }
+    )
+    RAW_BEARER_RE = re.compile(r"(?i)^\s*bearer\s+\S+")
+    PATH_KEY_SET = frozenset(k.lower() for k in WORKSPACE_PATH_KEYS) | {"paths", "files", "folders", "directories"}
+
+    @classmethod
+    def _iter_kv_pairs(cls, obj: Any) -> list[tuple[str, Any]]:
+        pairs: list[tuple[str, Any]] = []
+        if isinstance(obj, Mapping):
+            for k, v in obj.items():
+                key_str = str(k)
+                pairs.append((key_str, v))
+                if isinstance(v, (Mapping, list, tuple)):
+                    pairs.extend(cls._iter_kv_pairs(v))
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                if isinstance(item, (Mapping, list, tuple)):
+                    pairs.extend(cls._iter_kv_pairs(item))
+        return pairs
+
+    @classmethod
+    def _is_resource_id_key(cls, key: str) -> bool:
+        low = key.lower()
+        return (
+            key.endswith(("_id", "Id", "_name", "Name"))
+            or low in cls.URL_PATH_STATIC_KEYS
+        )
+
+    @classmethod
+    def _is_cli_positional_key(cls, key: str) -> bool:
+        low = key.lower()
+        return (
+            low in cls.CLI_FLAG_STATIC_KEYS
+            or key.endswith(("_name", "Name", "_dir", "Dir", "_path", "Path", "_url", "Url", "_target", "_id", "Id"))
+        )
+
+    @classmethod
+    def _is_path_key(cls, key: str) -> bool:
+        low = key.lower()
+        return (
+            low in cls.PATH_KEY_SET
+            or key.endswith(("_path", "Path", "_dir", "Dir", "_folder", "Folder", "_directory", "Directory"))
+        )
+
+    @classmethod
+    def _is_endpoint_url_key(cls, key: str) -> bool:
+        low = key.lower()
+        return low in cls.ENDPOINT_URL_KEYS or low.endswith("_url") or key.endswith("Url")
+
+    @classmethod
+    def _is_endpoint_token_key(cls, key: str) -> bool:
+        low = key.lower()
+        return low in cls.ENDPOINT_TOKEN_KEYS or low.endswith("_token") or key.endswith("Token") or low.endswith("_key") or key.endswith("Key")
 
     @classmethod
     def make_workspace_file_guard(
@@ -465,21 +724,233 @@ class StandardArgGuards:
         return make_workspace_path_guard(workspace_root, is_write=is_write)
 
     @classmethod
-    def shell_metachar_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
-        for k, v in args.items():
-            if isinstance(v, str) and cls.SHELL_METACHAR_RE.search(v):
-                return False, f"Shell metacharacter injection blocked in parameter '{k}' (A4.1)."
+    def path_command_substitution_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks embedded POSIX command substitution (`$(...)`, backticks, `${...}`) in file/folder path args."""
+        for k, v in cls._iter_kv_pairs(args):
+            if not cls._is_path_key(k):
+                continue
+            values = v if isinstance(v, (list, tuple)) else [v]
+            for item in values:
+                if isinstance(item, str) and POSIX_CMD_SUBST_RE.search(item):
+                    return (
+                        False,
+                        f"Embedded POSIX command substitution / shell expansion blocked in path parameter '{k}' (CWE-78): '{item}'.",
+                    )
         return True, "OK"
 
     @classmethod
+    def shell_metachar_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        def _scan(val: Any, key_path: str) -> tuple[bool, str]:
+            if isinstance(val, str):
+                if cls.SHELL_METACHAR_RE.search(val) or '"' in val:
+                    return False, f"Shell metacharacter injection blocked in parameter '{key_path}' (A4.1)."
+                return True, "OK"
+            if isinstance(val, Mapping):
+                for k, v in val.items():
+                    ok, reason = _scan(v, f"{key_path}.{k}" if key_path else str(k))
+                    if not ok:
+                        return False, reason
+            elif isinstance(val, (list, tuple)):
+                for idx, item in enumerate(val):
+                    ok, reason = _scan(item, f"{key_path}[{idx}]")
+                    if not ok:
+                        return False, reason
+            return True, "OK"
+
+        return _scan(args, "")
+
+    @classmethod
     def sql_safety_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
-        sql = str(args.get("sql", "") or args.get("query", ""))
-        match = cls.DESTRUCTIVE_SQL_RE.search(sql)
-        if match:
-            return False, f"Forbidden SQL keyword/function '{match.group(1)}' blocked (A4.3/A8.1)."
-        if ";" in sql.strip().rstrip(";"):
-            return False, "Stacked multi-statement SQL query blocked (A4.3)."
+        """
+        Multi-statement & clause-level SQL AST guard (A4.3 / A8.1).
+        Strips `--` and `/* ... */` comments (both space-joined and compact) to defeat
+        comment-splitting obfuscation, detects stacked `;` queries, and validates
+        sub-clauses (`where_clause`, `order_by`, `filter`, `having`, `sort_by`, `group_by`).
+        """
+        kv_pairs = cls._iter_kv_pairs(args)
+
+        for key, val in kv_pairs:
+            if key.lower() not in {"statement", "sql", "sql_query", "query"}:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                continue
+            sql = val
+            sql_space = cls.SQL_COMMENT_RE.sub(" ", sql)
+            sql_compact = cls.SQL_COMMENT_RE.sub("", sql)
+            if "/*" in sql_space:
+                return False, f"Unclosed SQL block comment blocked in '{key}' (A4.3)."
+            for candidate in (sql, sql_space, sql_compact):
+                match = cls.DESTRUCTIVE_SQL_RE.search(candidate)
+                if match:
+                    return False, f"Forbidden SQL keyword/function '{match.group(1)}' blocked (A4.3/A8.1)."
+            no_literals = cls.SQL_SINGLE_QUOTED_RE.sub("''", sql_space)
+            if ";" in no_literals.strip().rstrip(";"):
+                return False, "Stacked multi-statement SQL query blocked (A4.3)."
+
+        for key, clause_val in kv_pairs:
+            if key.lower() not in {"where_clause", "order_by", "filter", "having", "sort_by", "group_by"}:
+                continue
+            if not isinstance(clause_val, str) or not clause_val.strip():
+                continue
+            if ";" in clause_val or cls.SQL_COMMENT_RE.search(clause_val) or "/*" in clause_val or "--" in clause_val:
+                return False, f"SQL clause injection blocked in '{key}' (A4.3)."
+            clause_space = cls.SQL_COMMENT_RE.sub(" ", clause_val)
+            clause_compact = cls.SQL_COMMENT_RE.sub("", clause_val)
+            for candidate in (clause_space, clause_compact):
+                if cls.SQL_CLAUSE_INJECTION_RE.search(candidate):
+                    return False, f"SQL clause injection blocked in '{key}' (A4.3)."
+                match = cls.DESTRUCTIVE_SQL_RE.search(candidate)
+                if match:
+                    return False, f"Forbidden SQL keyword '{match.group(1)}' blocked in '{key}' (A4.3)."
         return True, "OK"
+
+    @classmethod
+    def url_path_segment_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks `..`, `%2e%2e`, `/`, `%2f`, `\\`, `?`, and `#` in REST resource identifier parameters (CWE-22)."""
+        for key, val in cls._iter_kv_pairs(args):
+            if not cls._is_resource_id_key(key):
+                continue
+            values = val if isinstance(val, (list, tuple)) else [val]
+            for item in values:
+                if not isinstance(item, str) or not item:
+                    continue
+                decoded_once = urllib.parse.unquote(item)
+                decoded_twice = urllib.parse.unquote(decoded_once)
+                for candidate in (item, decoded_once, decoded_twice):
+                    if cls.URL_PATH_TRAVERSAL_RE.search(candidate):
+                        return (
+                            False,
+                            f"URL path-segment traversal / delimiter blocked in '{key}' (CWE-22): '{item}'.",
+                        )
+        return True, "OK"
+
+    @classmethod
+    def cli_flag_injection_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks leading `-` / `--` flags injected into positional resource/directory/target arguments (CWE-88)."""
+        for key, val in cls._iter_kv_pairs(args):
+            if not cls._is_cli_positional_key(key):
+                continue
+            values = val if isinstance(val, (list, tuple)) else [val]
+            for item in values:
+                if not isinstance(item, str):
+                    continue
+                stripped = item.strip()
+                if stripped.startswith("-") or cls.CLI_EMBEDDED_FLAG_RE.search(stripped):
+                    return (
+                        False,
+                        f"CLI argument/flag injection blocked in '{key}' (CWE-88): '{item}'.",
+                    )
+        return True, "OK"
+
+    @classmethod
+    def make_endpoint_repoint_guard(
+        cls,
+        *,
+        tool_name: str = "",
+        allow_repoint: bool = False,
+        trusted_hosts: set[str] | list[str] | tuple[str, ...] | None = None,
+    ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+        """
+        Runtime Endpoint & Session Re-pointing Guard (inspired by `GHSA-rvjm-7hvp-f868`).
+        Blocks runtime connection-mutation tools (`connect_to_*`, `switch_server`, `set_endpoint`,
+        `configure_connection`) unless explicitly opted in, and blocks mid-session `*_url` +
+        `*_token`/`*_key` repointing to local/private/untrusted hosts or raw bearer token exposure.
+        """
+        is_repoint_tool = bool(tool_name and cls.ENDPOINT_REPOINT_TOOL_RE.search(tool_name))
+        normalized_trusted = {h.strip().lower() for h in (trusted_hosts or ()) if h and h.strip()}
+
+        def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+            if is_repoint_tool and not allow_repoint:
+                return (
+                    False,
+                    f"Runtime endpoint/session re-pointing tool '{tool_name}' blocked (GHSA-rvjm-7hvp-f868): explicit capability opt-in required.",
+                )
+
+            pairs = cls._iter_kv_pairs(args)
+            url_entries: list[tuple[str, str]] = []
+            token_entries: list[tuple[str, str]] = []
+
+            for k, v in pairs:
+                if not isinstance(v, str) or not v.strip():
+                    continue
+                val_s = v.strip()
+                if cls._is_endpoint_url_key(k):
+                    url_entries.append((k, val_s))
+                if cls._is_endpoint_token_key(k) or cls.RAW_BEARER_RE.search(val_s):
+                    token_entries.append((k, val_s))
+
+            # Raw bearer token or secret credential passed in connection-mutation context
+            # or paired mid-session with an endpoint URL (`*_url` + `*_token`/`*_key`).
+            has_raw_token = any(
+                not t_val.startswith("<MCP_REDACTED_")
+                for _, t_val in token_entries
+            )
+            if has_raw_token and (is_repoint_tool or url_entries):
+                tok_keys = ", ".join(k for k, _ in token_entries)
+                return (
+                    False,
+                    f"Raw bearer token / credential in LLM context blocked for runtime endpoint parameters ({tok_keys}) (GHSA-rvjm-7hvp-f868).",
+                )
+
+            # Validate any endpoint/provider URL target when repointing
+            for u_key, u_val in url_entries:
+                low_u = u_val.lower()
+                if low_u in {"local", "localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+                    if low_u not in normalized_trusted:
+                        return (
+                            False,
+                            f"Runtime endpoint re-pointing to '{u_val}' in '{u_key}' blocked (GHSA-rvjm-7hvp-f868).",
+                        )
+                    continue
+
+                if "://" in u_val or u_key.lower() in {"host", "endpoint"}:
+                    ok_net, net_reason = validate_outbound_network_target(
+                        u_val, allow_private_hosts=normalized_trusted or None
+                    )
+                    if not ok_net:
+                        return False, f"Runtime endpoint re-pointing blocked in '{u_key}' (GHSA-rvjm-7hvp-f868): {net_reason}"
+
+                    if is_repoint_tool or token_entries:
+                        parsed = urllib.parse.urlsplit(u_val if "://" in u_val else f"https://{u_val}")
+                        target_host = (parsed.hostname or "").lower()
+                        if target_host and target_host not in normalized_trusted:
+                            return (
+                                False,
+                                f"Untrusted runtime endpoint host '{target_host}' in '{u_key}' blocked (GHSA-rvjm-7hvp-f868).",
+                            )
+
+            return True, "OK"
+
+        return _guard
+
+    @classmethod
+    def endpoint_repoint_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Default fail-closed runtime endpoint & session re-pointing argument guard (GHSA-rvjm-7hvp-f868)."""
+        return cls.make_endpoint_repoint_guard()(args)
+
+    @classmethod
+    def make_org_allowlist_guard(
+        cls, allowed_orgs: set[str] | list[str] | tuple[str, ...]
+    ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+        normalized = {o.strip().lower() for o in allowed_orgs if o and o.strip()}
+
+        def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+            if not normalized:
+                return True, "OK"
+            org = str(args.get("terraform_org_name") or "").strip().lower()
+            if not org:
+                return (
+                    False,
+                    "Fail-closed tenant boundary policy: unscoped ID-only tool call missing 'terraform_org_name' blocked (CWE-863).",
+                )
+            if org not in normalized:
+                return (
+                    False,
+                    f"Organization '{org}' is not in mcp-cage tenant allowlist {sorted(normalized)} (CWE-863).",
+                )
+            return True, "OK"
+
+        return _guard
 
     @classmethod
     def ssrf_url_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
@@ -1343,16 +1814,24 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
-        r"(?i)(?:^|[._])(read_file|read_text_file|query|select_sql|get_secret|read_env|customer_db)(?:$|[._])"
+        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|run_command|run_shell_command|write_file|delete_file|execute_sql|drop_table|git_push|merge_pr)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter)(?:$|[._])"
+    )
+
+    SQL_TOOL_RE = re.compile(
+        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|semantic_view|run_query|execute_query|db_query|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
+    )
+    NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
+    WORKSPACE_FILE_TOOL_RE = re.compile(
+        r"(?i)(?:read_file|read_text_file|read_multiple_files|write_file|edit_file|delete_file|append_file|move_file|copy_file|put_content|patch_content|append_content|deploy_local_folder|container_file_|sos_report|cluster_toolkit|local_folder)"
     )
 
     @classmethod
@@ -1381,6 +1860,9 @@ class ToxicFlowGraphAnalyzer:
             roles.add(ToolRole.PRIVILEGED_MUTATOR)
         if cls.EGRESS_REGEX.search(fq):
             roles.add(ToolRole.EXTERNAL_EGRESS_SINK)
+        if StandardArgGuards.ENDPOINT_REPOINT_TOOL_RE.search(fq):
+            roles.add(ToolRole.PRIVILEGED_MUTATOR)
+            roles.add(ToolRole.EXTERNAL_EGRESS_SINK)
 
         # 2. Official MCP 2025 Tool Annotations support
         if annotations.get("destructiveHint") is True:
@@ -1394,11 +1876,90 @@ class ToxicFlowGraphAnalyzer:
 
     @classmethod
     def build_default_profile(
-        cls, server: str, tool_name: str, description: str = ""
+        cls,
+        server: str,
+        tool_name: str,
+        description: str = "",
+        workspace_root: Path | None = None,
+        allowed_orgs: set[str] | list[str] | tuple[str, ...] | None = None,
+        allow_endpoint_repoint: bool = False,
+        trusted_endpoints: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> ToolSecurityProfile:
         roles = frozenset(cls.classify_tool(server, tool_name, description))
         is_egress = ToolRole.EXTERNAL_EGRESS_SINK in roles
         is_mutator = ToolRole.PRIVILEGED_MUTATOR in roles
+        low_tool = tool_name.lower()
+
+        # Universal zero-config v0.3.0 wire-level parameter guards
+        guards: list[Callable[[Mapping[str, Any]], tuple[bool, str]]] = [
+            StandardArgGuards.make_endpoint_repoint_guard(
+                tool_name=tool_name,
+                allow_repoint=allow_endpoint_repoint,
+                trusted_hosts=trusted_endpoints,
+            ),
+            StandardArgGuards.path_command_substitution_guard,
+            StandardArgGuards.cli_flag_injection_guard,
+            StandardArgGuards.url_path_segment_guard,
+        ]
+        if is_egress:
+            guards.append(make_ssrf_and_dns_guard(allow_private_hosts=set(trusted_endpoints) if trusted_endpoints else None))
+
+        if cls.SQL_TOOL_RE.search(low_tool) and not cls.NON_SQL_SEARCH_RE.search(low_tool):
+            guards.append(StandardArgGuards.sql_safety_guard)
+        else:
+            def _sql_presence_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+                keys_low = {k.lower() for k, _ in StandardArgGuards._iter_kv_pairs(args)}
+                has_explicit_sql = bool(keys_low & {"sql", "sql_query", "where_clause", "order_by"})
+                has_table_filter = bool(keys_low & {"filter", "having", "sort_by"}) and bool(
+                    keys_low & {"table", "table_name", "schema", "database", "collection"}
+                )
+                if has_explicit_sql or has_table_filter:
+                    return StandardArgGuards.sql_safety_guard(args)
+                return True, "OK"
+
+            guards.append(_sql_presence_guard)
+
+        if any(tok in low_tool for tok in ("deploy_local_folder", "cluster_toolkit", "sos_report", "container_exec")):
+            guards.append(StandardArgGuards.shell_metachar_guard)
+
+        if allowed_orgs and any(
+            tok in low_tool
+            for tok in (
+                "workspace",
+                "project",
+                "action_run",
+                "plan_",
+                "state_version",
+                "run_details",
+                "run_comments",
+                "team",
+            )
+        ):
+            guards.append(StandardArgGuards.make_org_allowlist_guard(allowed_orgs))
+
+        if workspace_root is not None:
+            is_write_tool = any(
+                w in low_tool for w in ("write", "edit", "delete", "append", "patch", "put", "move", "copy", "sos_report", "toolkit", "deploy")
+            )
+            ws_guard = StandardArgGuards.make_workspace_file_guard(workspace_root, is_write=is_write_tool)
+            if cls.WORKSPACE_FILE_TOOL_RE.search(low_tool) or ToolRole.WORKSPACE_MUTATOR in roles:
+                guards.append(ws_guard)
+            else:
+                def _local_dir_presence_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+                    keys_low = {k.lower() for k, _ in StandardArgGuards._iter_kv_pairs(args)}
+                    if keys_low & LOCAL_DIR_ONLY_KEYS:
+                        return ws_guard(args)
+                    return True, "OK"
+
+                guards.append(_local_dir_presence_guard)
+
+        def _combined_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+            for g in guards:
+                ok, reason = g(args)
+                if not ok:
+                    return False, reason
+            return True, "OK"
+
         return ToolSecurityProfile(
             server=server,
             tool_name=tool_name,
@@ -1415,7 +1976,7 @@ class ToxicFlowGraphAnalyzer:
             max_allowed_confidentiality=(
                 Confidentiality.PUBLIC if is_egress else Confidentiality.SECRET
             ),
-            arg_guard=make_ssrf_and_dns_guard() if is_egress else None,
+            arg_guard=_combined_guard if guards else None,
         )
 
     @classmethod
@@ -1710,26 +2271,46 @@ class MCPWireGateway:
 
     def __init__(
         self,
-        server_name: str,
-        state_machine: SessionTaintStateMachine,
-        scrubber: BidirectionalSecretScrubber,
-        verifier: SchemaLockVerifier,
+        server_name: str = "default",
+        state_machine: SessionTaintStateMachine | None = None,
+        scrubber: BidirectionalSecretScrubber | None = None,
+        verifier: SchemaLockVerifier | None = None,
         workspace_root: Path | None = None,
         tool_profiles: dict[str, ToolSecurityProfile] | None = None,
+        allowed_orgs: set[str] | list[str] | tuple[str, ...] | None = None,
+        allow_endpoint_repoint: bool = False,
+        trusted_endpoints: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.server_name = server_name
-        self.state_machine = state_machine
-        self.scrubber = scrubber
-        self.verifier = verifier
         self.workspace_root = (workspace_root or Path.cwd()).resolve()
+        default_state_dir = self.workspace_root / ".mcp-cage"
+        default_db = default_state_dir / "taint_state.db"
+        if state_machine is None or scrubber is None or verifier is None:
+            default_state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_machine = state_machine or SessionTaintStateMachine(
+            db_path=default_db,
+            audit_log_path=default_state_dir / "audit.jsonl",
+        )
+        self.scrubber = scrubber or BidirectionalSecretScrubber(db_path=default_db)
+        self.verifier = verifier or SchemaLockVerifier(lockfile_path=default_state_dir / "mcp-lock.json")
         self.tool_profiles: dict[str, ToolSecurityProfile] = dict(tool_profiles or {})
+        self.allowed_orgs = allowed_orgs
+        self.allow_endpoint_repoint = allow_endpoint_repoint
+        self.trusted_endpoints = trusted_endpoints
         self.in_flight_requests: dict[int | str, InFlightRequest] = {}
         self.auto_pin_new: bool = True
 
     def _get_or_build_profile(self, tool_name: str) -> ToolSecurityProfile:
         if tool_name in self.tool_profiles:
             return self.tool_profiles[tool_name]
-        prof = ToxicFlowGraphAnalyzer.build_default_profile(self.server_name, tool_name)
+        prof = ToxicFlowGraphAnalyzer.build_default_profile(
+            self.server_name,
+            tool_name,
+            workspace_root=self.workspace_root,
+            allowed_orgs=self.allowed_orgs,
+            allow_endpoint_repoint=self.allow_endpoint_repoint,
+            trusted_endpoints=self.trusted_endpoints,
+        )
         self.tool_profiles[tool_name] = prof
         return prof
 
@@ -1838,7 +2419,13 @@ class MCPWireGateway:
                 t_name = str(t.get("name") or "")
                 if t_name and t_name not in self.tool_profiles:
                     self.tool_profiles[t_name] = ToxicFlowGraphAnalyzer.build_default_profile(
-                        self.server_name, t_name, str(t.get("description") or "")
+                        self.server_name,
+                        t_name,
+                        str(t.get("description") or ""),
+                        workspace_root=self.workspace_root,
+                        allowed_orgs=self.allowed_orgs,
+                        allow_endpoint_repoint=self.allow_endpoint_repoint,
+                        trusted_endpoints=self.trusted_endpoints,
                     )
             return {**msg, "result": {**result, "tools": sanitized_tools}}, None
 
@@ -1999,7 +2586,9 @@ def _build_native_hook_profile(
             arg_guard=make_ssrf_and_dns_guard() if has_network_egress else None,
         )
 
-    return ToxicFlowGraphAnalyzer.build_default_profile("native", tool_name)
+    return ToxicFlowGraphAnalyzer.build_default_profile(
+        "native", tool_name, workspace_root=workspace_root
+    )
 
 
 def handle_cli_hook(
@@ -2265,6 +2854,15 @@ def main(argv: list[str] | None = None) -> int:
         return run_stdio_wrapper(args)
 
     return 1
+
+
+MCPCageEngine = MCPWireGateway
+endpoint_repoint_guard = StandardArgGuards.endpoint_repoint_guard
+make_endpoint_repoint_guard = StandardArgGuards.make_endpoint_repoint_guard
+path_command_substitution_guard = StandardArgGuards.path_command_substitution_guard
+url_path_segment_guard = StandardArgGuards.url_path_segment_guard
+cli_flag_injection_guard = StandardArgGuards.cli_flag_injection_guard
+sql_safety_guard = StandardArgGuards.sql_safety_guard
 
 
 if __name__ == "__main__":

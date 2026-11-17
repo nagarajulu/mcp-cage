@@ -12,7 +12,7 @@
 [![Dependencies: Zero](https://img.shields.io/badge/dependencies-zero%20(100%25%20stdlib)-success.svg)](pyproject.toml)
 
 > 🚀 **Try the Live Interactive Web Sandbox in Your Browser:** [**`https://nagarajulu.github.io/mcp-cage/`**](https://nagarajulu.github.io/mcp-cage/)  
-> Explore the **5 Integration Modes** (`wrap`, `hook`, `shell`, Python SDK, `mcp-sploit`), inspect the **8-Plane Security Feature Matrix**, replay **V1 Failure vs. V0.2.2 Blocked Exploits** on the live $(P \times U \Rightarrow S)$ graph, and generate copy-paste configs for **Claude Code, Cursor, Gemini CLI, Antigravity (`agy`), Codex, Claude Desktop, and LangGraph**.
+> Explore the **5 Integration Modes** (`wrap`, `hook`, `shell`, Python SDK, `mcp-sploit`), inspect the **8-Plane Security Feature Matrix**, replay **V1 Failure vs. v0.3.0 Blocked Exploits** on the live $(P \times U \Rightarrow S)$ graph, and generate copy-paste configs for **Claude Code, Cursor, Gemini CLI, Antigravity (`agy`), Codex, Claude Desktop, and LangGraph**.
 
 ---
 
@@ -53,6 +53,26 @@ When all three meet in a single session—Simon Willison's **Lethal Trifecta**�
 - **On-the-Wire Tool Sanitization & Rug-Pull Detection (`SchemaLockVerifier`):** Strips `<IMPORTANT>`, `<system>`, HTML comments, and cross-server shadowing directives from `tools/list` descriptions prior to SHA-256 pinning in `mcp-lock.json`.
 - **Workspace Config Auditor (`mcp-cage audit-config`):** Scans `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and `claude_desktop_config.json` for `CurXecute` relative-path RCE (`./`, `../`, `/tmp/`, `bash -c`, command chaining), hardcoded plaintext API keys in `env` blocks, and unwrapped MCP servers.
 
+### 5. Zero-Config Empirical Wire-Level Parameter Guards (`v0.3.0`)
+Automatically enforced out of the box by `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy`, and Plane B hooks:
+- **Runtime Endpoint & Session Re-pointing Guard (`endpoint_repoint_guard`):** Blocks runtime connection-mutation tools (`connect_to_*`, `switch_server`, `set_endpoint`, `configure_connection`) unless explicitly opted in, and blocks mid-session `*_url` + `*_token`/`*_key` repointing to `local`, `localhost`, `127.0.0.1`, `169.254.169.254`, RFC1918, or untrusted hosts as well as raw bearer tokens in LLM context (`GHSA-rvjm-7hvp-f868`).
+- **Embedded POSIX Command Substitution Guard (`path_command_substitution_guard` + `make_workspace_path_guard`):** Inspects `folderPath`, `filePath`, `source_dir`, `app_dir`, `working_directory`, `download_directory`, `destination`, and `path` for `$(...)`, `` `...` ``, and `${...}` even when disguised inside a valid relative workspace path segment (`CWE-78`).
+- **REST URL Path-Segment Traversal Guard (`url_path_segment_guard`):** Blocks `..`, `%2e%2e`, `/`, `%2f`, `\`, `?`, and `#` (including URL-decoded/double-encoded forms) across `*_id`, `*Id`, `*Name`, `scriptName`, `job_id`, `session_id`, `rag_id`, `bucket`, and `repo` before REST URL interpolation (`CWE-22`).
+- **CLI Positional-Argument Flag Injection Guard (`cli_flag_injection_guard`):** Blocks leading `-` / `--` flags (`--upload-pack=`, `--template=`, `--kubeconfig=`, `--token=`, `--output=`) injected into positional resource, directory, or target arguments (`CWE-88`).
+- **Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard`):** Strips `--` and `/* ... */` comments (both space-joined and compact to defeat token splitting), detects stacked `;` queries, and enforces SQLi checks across `where_clause`, `order_by`, `filter`, `having`, `sort_by`, and `group_by` (`A4.3` / `A8.1`).
+
+---
+
+## Empirical Co-Design Evolution (`v0.1.0` → `v0.2.2` → `v0.3.0`)
+
+Each `mcp-cage` release translates real-world vulnerability classes uncovered across audited public and Big-Tech MCP servers into general-purpose, zero-config architectural capabilities:
+
+| Release | Architectural Milestone | Real-World Audited MCP Servers / Incidents Addressed | Generalized Guard Plane |
+| :--- | :--- | :--- | :--- |
+| **`v0.1.0`** | Dual-Lattice IFC & Wire Prototype | Invariant Labs GitHub MCP Exploit, `MCPTox`, Microsoft Spotlighting, `MELON` | `SessionTaintStateMachine`, `SchemaLockVerifier` (`mcp-lock.json`), randomized datamarking boundaries, `ToxicFlowGraphAnalyzer` (`mcp-sploit`). |
+| **`v0.2.2`** | Cross-Process WAL & Dual-Plane Firewall | `CVE-2025-53110`, `CVE-2025-53773` (Copilot YOLO), `CVE-2025-54135` (`CurXecute`), AWS IMDSv1 SSRF, DNS exfiltration | Shared SQLite WAL `BidirectionalSecretScrubber`, `BEGIN IMMEDIATE` atomic taint, `validate_outbound_network_target` (IMDS/RFC1918/Shannon DNS), `WorkspaceMCPConfigAuditor`, Plane A + Plane B hooks. |
+| **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), `GoogleCloudPlatform/cloud-run-mcp` (`#586725173`), `cloudflare/mcp-server-cloudflare`, `GoogleCloudPlatform/gke-mcp` & `Flux159/mcp-server-kubernetes`, `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql` | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
+
 ---
 
 ## Quick Start (Zero Dependencies)
@@ -65,7 +85,8 @@ pip install -e .
 # 1. Run the 5-Act Interactive Verification Demo
 python3 demo_interactive.py
 
-# 2. Run the Full Unit & 8-Plane E2E Security Test Suites
+# 2. Run the Full Unit, v0.3.0 Empirical Guards & 8-Plane E2E Security Test Suites
+python3 test_mcp_cage_v30_empirical_guards.py -v
 python3 test_mcp_cage_v21.py -v
 python3 test_e2e_all_8_planes.py
 
@@ -208,9 +229,11 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 | [`mcp_cage_proxy.py`](mcp_cage_proxy.py) | Full JSON-RPC 2.0 wire proxy (`MCPJsonRpcProxy` & `StdioSubprocessBridge`) covering `tools/list`, `tools/call`, `resources/read`, `prompts/get`, and `sampling/createMessage`. |
 | [`mcp_cage_cli.py`](mcp_cage_cli.py) | Standalone `stdio` process wrapper (`mcp-cage wrap`) with dynamic `tools/list` classification and config generator. |
 | [`demo_interactive.py`](demo_interactive.py) | 5-Act interactive terminal walkthrough demonstrating every defense end-to-end. |
+| [`test_mcp_cage_v30_empirical_guards.py`](test_mcp_cage_v30_empirical_guards.py) | v0.3.0 empirical guard regression suite covering Jupyter runtime hijack, Cloud Run `app$(...)`, Cloudflare path traversal, GKE/K8s CLI flag injection, Snowflake/MySQL SQLi, and sub-millisecond latency. |
 | [`test_mcp_cage_v21.py`](test_mcp_cage_v21.py) | Comprehensive V2.2 unit & integration test suite (10 test suites including SSRF/DNS exfil & `CurXecute` config auditing). |
 | [`test_e2e_all_8_planes.py`](test_e2e_all_8_planes.py) | 8-Plane End-to-End security test suite (17 tests across cognitive, protocol, trifecta, parameter, memory, and subprocess planes). |
-| [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, V1 vs. V0.2.2 Exploit Simulator, Config Generator & 1966–2026 Research Lineage ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
+| [`CHANGELOG.md`](CHANGELOG.md) | Empirical Co-Design release lineage (`v0.1.0` → `v0.2.2` → `v0.3.0`). |
+| [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, V1 vs. v0.3.0 Exploit Simulator, Config Generator & 1966–2026 Research Lineage ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
 
 ---
 

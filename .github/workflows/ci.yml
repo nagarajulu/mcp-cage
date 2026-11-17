@@ -24,8 +24,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Run v0.3.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)
+        run: python3 test_mcp_cage_v30_empirical_guards.py -v
+
       - name: Run V2.2 Unit & Dual-Plane Security Suite (test_mcp_cage_v21.py)
         run: python3 test_mcp_cage_v21.py -v
+
+      - name: Run 8-Plane End-to-End Security Suite (test_e2e_all_8_planes.py)
+        run: python3 test_e2e_all_8_planes.py -v
 
       - name: Run Interactive 5-Act Verification Demo (demo_interactive.py)
         run: python3 demo_interactive.py
