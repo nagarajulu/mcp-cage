@@ -586,6 +586,8 @@ class StandardArgGuards:
             "instance",
             "domain",
             "ip_or_domain",
+            "tracking_number",
+            "new_tracking_number",
         }
     )
     REST_RELATIVE_PATH_TOOL_RE = re.compile(
@@ -961,6 +963,44 @@ class StandardArgGuards:
                                 f"Untrusted runtime endpoint host '{target_host}' in '{u_key}' blocked (GHSA-rvjm-7hvp-f868).",
                             )
 
+            return True, "OK"
+
+        return _guard
+
+    SENSITIVE_ATTACHMENT_RE = re.compile(
+        r"(?i)(?:^|[\\/])(?:\.imap-mcp|\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.env(?:\.[^\\/]*)?|id_rsa|id_ed25519|etc[\\/]shadow|etc[\\/]passwd)(?:$|[\\/]|$)"
+    )
+
+    @classmethod
+    def make_attachment_path_guard(
+        cls, workspace_root: Path | None = None
+    ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
+        """Blocks sensitive host credentials/dotfiles and out-of-workspace escapes in email `attachments`."""
+
+        def _guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+            att_val = args.get("attachments")
+            if not isinstance(att_val, (list, tuple)) or not att_val:
+                return True, "OK"
+            for item in att_val:
+                raw_path = None
+                if isinstance(item, str):
+                    raw_path = item
+                elif isinstance(item, Mapping):
+                    for k in ("path", "filePath", "file_path"):
+                        if isinstance(item.get(k), str):
+                            raw_path = item[k]
+                            break
+                if not raw_path or not raw_path.strip():
+                    continue
+                if "\x00" in raw_path or cls.SENSITIVE_ATTACHMENT_RE.search(raw_path):
+                    return (
+                        False,
+                        f"Sensitive host credential/dotfile attachment blocked (CWE-22/CWE-200): '{raw_path}'.",
+                    )
+                if workspace_root is not None:
+                    ok, reason = is_safe_workspace_path(raw_path, workspace_root, is_write=False)
+                    if not ok:
+                        return False, reason
             return True, "OK"
 
         return _guard
@@ -1349,13 +1389,33 @@ class SessionTaintStateMachine:
         finally:
             conn.close()
 
+    def _get_state_and_entities(self) -> tuple[StateTuple, list[str]]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT integrity, confidentiality, provenance_json, leases_json, untrusted_entities_json FROM session_taint WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            if not row:
+                return StateTuple(Integrity.TRUSTED, Confidentiality.PUBLIC, [], {}), []
+            return (
+                StateTuple(
+                    Integrity(row[0]),
+                    Confidentiality(row[1]),
+                    json.loads(row[2]),
+                    json.loads(row[3]),
+                ),
+                json.loads(row[4]) if row[4] else [],
+            )
+        finally:
+            conn.close()
+
     def on_tool_call(
         self,
         profile: ToolSecurityProfile,
         arguments: Mapping[str, Any],
     ) -> GateEvaluation:
-        ambient_int, ambient_conf, prov, leases = self.get_state()
-        untrusted_entities = self.get_untrusted_entities()
+        (ambient_int, ambient_conf, prov, leases), untrusted_entities = self._get_state_and_entities()
         now = time.time()
 
         # 1. Deterministic Argument Guard (Hard DENY — never bypassed by leases)
@@ -1856,16 +1916,16 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
@@ -1942,6 +2002,7 @@ class ToxicFlowGraphAnalyzer:
             StandardArgGuards.path_command_substitution_guard,
             StandardArgGuards.cli_flag_injection_guard,
             StandardArgGuards.url_path_segment_guard,
+            StandardArgGuards.make_attachment_path_guard(workspace_root),
         ]
         if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
             guards.append(StandardArgGuards.rest_relative_path_guard)
@@ -2389,6 +2450,25 @@ class MCPWireGateway:
                         "content": [{"type": "text", "text": f"[MCP-CAGE {eval_res.decision.name}] {eval_res.reason}"}],
                     },
                 }
+
+            # Meta-tool inner dispatch guard: evaluate wrapped `tool_name`/`tool` + `arguments`/`args`
+            inner_tool = arguments.get("tool_name") or arguments.get("tool")
+            inner_args = arguments.get("arguments") if "arguments" in arguments else arguments.get("args")
+            if tool_name == "tool_execute" and isinstance(inner_tool, str) and inner_tool.strip():
+                inner_profile = self._get_or_build_profile(inner_tool.strip())
+                inner_eval = self.state_machine.on_tool_call(
+                    inner_profile,
+                    inner_args if isinstance(inner_args, Mapping) else {},
+                )
+                if inner_eval.effective_decision != GateDecisionType.ALLOW:
+                    return None, {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {
+                            "isError": True,
+                            "content": [{"type": "text", "text": f"[MCP-CAGE {inner_eval.decision.name}] Meta-dispatch blocked: {inner_eval.reason}"}],
+                        },
+                    }
 
             forwarded = dict(msg)
             forwarded["params"] = {**params, "arguments": rehydrated_args}
