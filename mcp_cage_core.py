@@ -1814,7 +1814,7 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result)(?:$|[._])"
@@ -1823,7 +1823,7 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
