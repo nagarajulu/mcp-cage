@@ -594,10 +594,34 @@ class StandardArgGuards:
             "cluster",
             "instance",
             "domain",
+            "service",
+            "variable_key",
+            "xcom_key",
+            "username",
             "ip_or_domain",
             "tracking_number",
             "new_tracking_number",
             "test_type",
+        }
+    )
+    SENSITIVE_QUERY_FILTER_FIELDS = frozenset(
+        {
+            "api_key",
+            "api_secret",
+            "password",
+            "ldap_password",
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "secret_access_key",
+            "reset_password_key",
+            "iban",
+            "bank_account_no",
+            "auth_token",
+            "private_key",
+            "session_token",
+            "indexing_refresh_token",
+            "indexing_access_token",
         }
     )
     PICKLE_PARAM_KEYS = frozenset({"pmol", "p_mol", "p_query", "pickled_mol", "pickle_data"})
@@ -2155,6 +2179,38 @@ class ToxicFlowGraphAnalyzer:
                 return True, "OK"
 
             guards.append(_named_resource_segment_guard)
+        if low_tool in {"search_documents", "list_documents", "search_doctype", "search_link"}:
+            def _sensitive_filter_oracle_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+                raw_filters = args.get("filters")
+                if raw_filters is None:
+                    return True, "OK"
+
+                def _iter_filter_fields(obj: Any) -> list[str]:
+                    found: list[str] = []
+                    if isinstance(obj, Mapping):
+                        for k, v in obj.items():
+                            found.append(str(k))
+                            if isinstance(v, (Mapping, list, tuple)):
+                                found.extend(_iter_filter_fields(v))
+                    elif isinstance(obj, (list, tuple)):
+                        if obj and isinstance(obj[0], str) and obj[0].lower() not in {"and", "or"}:
+                            found.append(obj[1] if len(obj) >= 4 and isinstance(obj[1], str) else obj[0])
+                        else:
+                            for item in obj:
+                                if isinstance(item, (Mapping, list, tuple)):
+                                    found.extend(_iter_filter_fields(item))
+                    return found
+
+                for field_ref in _iter_filter_fields(raw_filters):
+                    norm = field_ref.replace("`", "").strip().lower().split(".")[-1]
+                    if norm in StandardArgGuards.SENSITIVE_QUERY_FILTER_FIELDS:
+                        return (
+                            False,
+                            f"Blind filter oracle on restricted sensitive field '{field_ref}' blocked (CWE-639/CWE-200).",
+                        )
+                return True, "OK"
+
+            guards.append(_sensitive_filter_oracle_guard)
         if is_egress:
             guards.append(make_ssrf_and_dns_guard(allow_private_hosts=set(trusted_endpoints) if trusted_endpoints else None))
 
