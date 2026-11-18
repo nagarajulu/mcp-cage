@@ -608,7 +608,7 @@ class StandardArgGuards:
     SAFE_PEP508_PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*(?:\[[A-Za-z0-9,._\-]+\])?(?:(?:==|>=|<=|~=|!=|>|<)[A-Za-z0-9.*+_!\-]+)?$")
     CODE_EXEC_KEYS = frozenset({"code", "python_code", "script"})
     SANDBOX_ESCAPE_RE = re.compile(
-        r"(?i)(?:__subclasses__|__bases__|__mro__|__globals__|__builtins__|BuiltinImporter|ctypes\.(?:WinDLL|CDLL|windll|cdll)|pty\.spawn|BROWSER_USE_API_KEY)"
+        r"(?i)(?:__subclasses__|__bases__|__base__|__mro__|__globals__|__builtins__|__import__|__getattribute__|__self__|__class__|__code__|__closure__|__reduce__|__reduce_ex__|BuiltinImporter|ctypes\.(?:WinDLL|CDLL|windll|cdll)|pty\.spawn|BROWSER_USE_API_KEY)"
     )
     REST_RELATIVE_PATH_TOOL_RE = re.compile(
         r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute)(?:$|[._])"
@@ -854,6 +854,20 @@ class StandardArgGuards:
     @classmethod
     def url_path_segment_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
         """Blocks `..`, `%2e%2e`, `/`, `%2f`, `\\`, `?`, and `#` in REST resource identifier parameters (CWE-22)."""
+        path_params_val = args.get("path_params") if isinstance(args, Mapping) else None
+        if isinstance(path_params_val, Mapping):
+            for p_key, p_val in path_params_val.items():
+                if not isinstance(p_val, str) or not p_val:
+                    continue
+                decoded_once = urllib.parse.unquote(p_val)
+                decoded_twice = urllib.parse.unquote(decoded_once)
+                for candidate in (p_val, decoded_once, decoded_twice):
+                    if cls.URL_PATH_TRAVERSAL_RE.search(candidate):
+                        return (
+                            False,
+                            f"URL path-segment traversal / delimiter blocked in 'path_params.{p_key}' (CWE-22): '{p_val}'.",
+                        )
+
         for key, val in cls._iter_kv_pairs(args):
             low_key = key.lower()
             is_id = cls._is_resource_id_key(key)
@@ -2020,7 +2034,7 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|get_page|visit_webpage|scrape_website|scrape_element_from_website|browse|browser|browser_use|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|webfetch|web_fetch|web_fetch_and_analyze|get_page|visit_webpage|scrape_website|scrape_element_from_website|browse|browser|browser_use|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
@@ -2029,7 +2043,7 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
