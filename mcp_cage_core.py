@@ -267,7 +267,7 @@ def _collect_workspace_paths(args: Mapping[str, Any]) -> list[str]:
         dir_val = src.get("directory") or src.get("dir") or src.get("folder_path") or src.get("folderPath")
         fname_val = src.get("filename") or src.get("file_name") or src.get("fileName")
         if isinstance(dir_val, str) and dir_val.strip() and isinstance(fname_val, str) and fname_val.strip():
-            found.append(os.path.join(dir_val.strip(), fname_val.strip()))
+            found.append(str(Path(dir_val.strip()) / fname_val.strip()))
         for list_key in ("paths", "files", "folders", "directories"):
             list_val = src.get(list_key)
             if isinstance(list_val, (list, tuple)):

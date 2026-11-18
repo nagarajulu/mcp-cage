@@ -25,10 +25,14 @@ Derived directly from security audits of real-world public and Big-Tech MCP serv
 5. **Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard`)**
    - *Empirical Lineage:* `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql`.
    - *Protection:* Strips `-- ...` and `/* ... */` SQL comments (both space-joined and compact to defeat `DR/**/OP` token splitting), rejects unclosed block comments, detects stacked `;` queries (while respecting string literals), and enforces clause-level SQL injection checks across `where_clause`, `order_by`, `filter`, `having`, `sort_by`, and `group_by` (`A4.3` / `A8.1`).
-6. **Unified Zero-Config Wire Enforcement & Regression Suite (`test_mcp_cage_v30_empirical_guards.py`)**
-   - Wired all 5 empirical guards into `ToxicFlowGraphAnalyzer.build_default_profile`, `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy` (`mcp_cage_cli.py`), and Plane B native hooks (`_build_native_hook_profile`).
-   - Fixed `MUTATOR_REGEX` server-prefix over-matching on `filesystem.*` read/search tools.
-   - Added comprehensive unit, E2E, and sub-millisecond latency regression tests in `test_mcp_cage_v30_empirical_guards.py`.
+6. **Unified Zero-Config Wire Enforcement & Regression Suite (`test_mcp_cage_v30_empirical_guards.py` & `test_agentic_ai_tools_and_non_regression.py`)**
+   - Wired all empirical guards into `ToxicFlowGraphAnalyzer.build_default_profile`, `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy` (`mcp_cage_cli.py`), and Plane B native hooks (`_build_native_hook_profile`).
+   - Added **Open-Source Agentic AI Framework & Wave 4–7 Guards**:
+     - `pickle_deserialization_guard` (`tandemai-inc/rdkit-mcp-server`, `CWE-502` with `0xdeadbeef` RDKit binary allowlist).
+     - `package_install_guard` (`crewAIInc/crewAI-tools` `CodeInterpreterTool` `libraries_used` PEP 508 validation blocking pip command/flag/URL injection).
+     - `code_sandbox_escape_guard` (`crewAIInc/crewAI-tools` `SandboxPython` dunder `__subclasses__` escape & `browser-use` `browser_exec` `BROWSER_USE_API_KEY` process-env harvesting).
+     - Split `(directory, filename)` path joining & Agent Skill (`SKILL.md`, `AGENTS.md`, `.claude/skills/`, `.agents/`) write protection.
+     - Single-command 6-suite non-regression runner (`run_all_regression_suites.py`).
 
 ---
 

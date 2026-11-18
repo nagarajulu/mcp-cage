@@ -712,6 +712,202 @@
     .btn-endorse { background: rgba(16,185,129,0.2); border-color: var(--green) !important; color: #a7f3d0; }
     .hidden { display: none !important; }
 
+    /* Accordion Styling per modern-web-guidance `accordion` */
+    .accordion-header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .toggle-all-btn {
+      background: var(--panel-alt);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      border-radius: 7px;
+      padding: 6px 13px;
+      font-size: 12.5px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .toggle-all-btn:hover {
+      background: var(--panel-hover);
+    }
+    [command="--toggle-all"][aria-expanded="true"] .expand,
+    [command="--toggle-all"][aria-expanded="false"] .collapse {
+      display: none;
+    }
+    .accordion > details {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .accordion > details > summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.65ch;
+      padding: 13px 16px;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-bright);
+    }
+    .accordion > details > summary::-webkit-details-marker {
+      display: none;
+    }
+    .accordion > details > summary:where(:not([aria-disabled="true"])) {
+      cursor: pointer;
+    }
+    .accordion > details > summary:where(:not([aria-disabled="true"])):hover {
+      background: var(--panel-hover);
+    }
+    .accordion > details > summary::before {
+      content: "";
+      inline-size: 1em;
+      block-size: 1em;
+      flex-shrink: 0;
+      background-color: var(--accent);
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E") no-repeat center / contain;
+      rotate: -90deg;
+    }
+    .accordion > details > summary:dir(rtl)::before {
+      rotate: 90deg;
+    }
+    .accordion > details[open] > summary::before {
+      rotate: 0deg;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .accordion > details > summary::before {
+        transition: rotate 0.2s;
+      }
+    }
+    .accordion > details::details-content {
+      interpolate-size: allow-keywords;
+      overflow: clip;
+      contain: layout;
+    }
+    .accordion > details:not([open])::details-content {
+      block-size: 0;
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .accordion > details::details-content {
+        transition: block-size, content-visibility, display;
+        transition-duration: 0.3s;
+        transition-timing-function: ease-in-out;
+        transition-behavior: allow-discrete;
+      }
+    }
+    .details-inner {
+      padding: 4px 18px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 13.5px;
+      color: #cbd5e1;
+    }
+
+    /* Responsive Sticky Table per modern-web-guidance `responsive-table` */
+    .table-wrapper {
+      overflow: auto;
+      max-inline-size: 100%;
+      max-block-size: min(540px, 80vh);
+      container-type: inline-size;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+    .table-wrapper table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+    }
+    .table-wrapper caption {
+      text-align: left;
+      padding: 12px 16px;
+      font-weight: 700;
+      font-size: 13.5px;
+      color: var(--text-bright);
+      background: var(--panel-alt);
+      border-bottom: 1px solid var(--border);
+    }
+    .table-wrapper thead {
+      position: sticky;
+      inset-block-start: 0;
+      z-index: 2;
+      background: var(--bg-elevated);
+    }
+    .table-wrapper tbody th {
+      position: sticky;
+      inset-inline-start: 0;
+      z-index: 1;
+      background: var(--panel-alt);
+      color: var(--text-bright);
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 12.5px;
+      border-bottom: 1px solid rgba(36, 50, 75, 0.7);
+    }
+    @container (width < 600px) {
+      .table-wrapper table,
+      .table-wrapper thead,
+      .table-wrapper tbody,
+      .table-wrapper tr,
+      .table-wrapper th,
+      .table-wrapper td {
+        display: block;
+      }
+      .table-wrapper thead {
+        display: none;
+      }
+      .table-wrapper tr {
+        margin-block-end: 1rem;
+        border: 1px solid var(--border);
+      }
+      .table-wrapper tbody th {
+        position: sticky;
+        inset-block-start: 0;
+        z-index: 2;
+        background: var(--panel-hover);
+      }
+      .table-wrapper table {
+        --label-2: "Sector";
+        --label-3: "Vulnerability Class";
+        --label-4: "mcp-cage v0.3.0 Guard";
+        --label-5: "Regression Suite";
+      }
+      .table-wrapper td:nth-child(2)::before { content: var(--label-2) ": "; font-weight: 700; color: var(--accent); }
+      .table-wrapper td:nth-child(3)::before { content: var(--label-3) ": "; font-weight: 700; color: var(--accent); }
+      .table-wrapper td:nth-child(4)::before { content: var(--label-4) ": "; font-weight: 700; color: var(--accent); }
+      .table-wrapper td:nth-child(5)::before { content: var(--label-5) ": "; font-weight: 700; color: var(--accent); }
+    }
+
+    .sector-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .sector-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .sector-card h3 {
+      margin: 0 0 6px;
+      font-size: 14px;
+      color: var(--text-bright);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .sector-card p {
+      margin: 0;
+      font-size: 12.5px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
     footer {
       border-top: 1px solid var(--border);
       padding-top: 24px;
@@ -735,7 +931,8 @@
         <span class="brand-version">v0.3.0</span>
       </div>
       <div class="nav-links">
-        <a href="#integration-modes">5 Integration Modes</a>
+        <a href="#integration-modes">5 Modes</a>
+        <a href="#architecture-deep-dive">Visual Architecture &amp; Sectors</a>
         <a href="#security-planes">8-Plane Matrix</a>
         <a href="#live-simulator">Live Exploit Simulator</a>
         <a href="#config-generator">Config Generator</a>
@@ -848,6 +1045,307 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- 2B. VISUAL DUAL-PLANE ARCHITECTURE, 6-SECTOR COVERAGE & DEEP-DIVE GUIDE -->
+    <section id="architecture-deep-dive" class="section-block">
+      <div class="section-header">
+        <div>
+          <div class="section-eyebrow">Visual System Blueprint &amp; Empirical Coverage</div>
+          <h2 class="section-title">Where <code>mcp-cage</code> Sits, Which Sectors It Protects &amp; How to Deep-Dive</h2>
+          <p class="section-subtitle">
+            <code>mcp-cage</code> goes beyond standalone MCP servers: it unifies <strong>Plane A (MCP JSON-RPC 2.0 Wire Gateway)</strong> and <strong>Plane B (Native CLI/IDE Hooks &amp; Open-Source Agentic Frameworks like CrewAI, Smolagents &amp; Browser-Use)</strong> around a single atomic SQLite WAL reference monitor.
+          </p>
+        </div>
+      </div>
+
+      <!-- Visual SVG Dual-Plane Architecture Blueprint -->
+      <div class="card" style="margin-bottom:18px; padding:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:15px; color:var(--text-bright); text-transform:none; letter-spacing:0;">
+            End-to-End Dual-Plane Reference Monitor Topology (Plane A Wire Proxy + Plane B Native Hooks &amp; Agent Toolkits)
+          </h3>
+          <span class="badge green">ATOMIC SQLITE WAL (`BEGIN IMMEDIATE`) · &lt; 0.3ms OVERHEAD</span>
+        </div>
+        <svg viewBox="0 0 1120 310" role="img" aria-label="mcp-cage Dual-Plane Reference Monitor Architecture Diagram" style="width:100%; height:auto; background:#090e1a; border:1px solid var(--border); border-radius:10px; display:block;">
+          <defs>
+            <marker id="arrBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+            </marker>
+            <marker id="arrGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+            </marker>
+            <marker id="arrRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#ef4444" />
+            </marker>
+          </defs>
+
+          <!-- Left Column: Untrusted Agent / LLM Context -->
+          <rect x="20" y="24" width="245" height="262" rx="10" fill="#111827" stroke="#3b82f6" stroke-width="1.5" />
+          <text x="36" y="50" fill="#38bdf8" font-size="11" font-weight="700" font-family="monospace">1. AI HOST / AGENT RUNTIME</text>
+          <text x="36" y="72" fill="#f8fafc" font-size="13" font-weight="700">LLM Context Window</text>
+          <text x="36" y="92" fill="#94a3b8" font-size="11">• Claude Code / Cursor / Codex</text>
+          <text x="36" y="110" fill="#94a3b8" font-size="11">• Gemini CLI / Antigravity (agy)</text>
+          <text x="36" y="128" fill="#94a3b8" font-size="11">• CrewAI / Smolagents / Browser-Use</text>
+          <rect x="34" y="146" width="217" height="56" rx="6" fill="#162033" stroke="#24324b" />
+          <text x="44" y="166" fill="#34d399" font-size="10.5" font-family="monospace">Sees Only Scrubbed Handle:</text>
+          <text x="44" y="186" fill="#fbbf24" font-size="10.5" font-family="monospace">&lt;MCP_REDACTED_OPENAI_KEY_1&gt;</text>
+          <rect x="34" y="212" width="217" height="56" rx="6" fill="#162033" stroke="#24324b" />
+          <text x="44" y="232" fill="#cbd5e1" font-size="10.5" font-family="monospace">Spotlighting Datamarking:</text>
+          <text x="44" y="252" fill="#38bdf8" font-size="10" font-family="monospace">&lt;&lt;&lt;UNTRUSTED_DATA id=9f2a&gt;&gt;&gt;</text>
+
+          <!-- Center Column Top: Plane A Wire Gateway -->
+          <rect x="335" y="20" width="430" height="92" rx="10" fill="#131c31" stroke="#06b6d4" stroke-width="1.5" />
+          <text x="352" y="42" fill="#06b6d4" font-size="11" font-weight="700" font-family="monospace">PLANE A — `mcp-cage wrap` (JSON-RPC 2.0 stdio Wire Proxy)</text>
+          <text x="352" y="62" fill="#e2e8f0" font-size="11.5">• `tools/list`: SHA-256 `mcp-lock.json` Pinning + `MCPTox` Injection Stripper</text>
+          <text x="352" y="80" fill="#e2e8f0" font-size="11.5">• `tools/call`: 10+ Zero-Config Empirical Arg Guards + Lethal Trifecta Gate</text>
+          <text x="352" y="98" fill="#e2e8f0" font-size="11.5">• `resources/read` &amp; `sampling`: Bidirectional Secret Scrubber + Hijack Block</text>
+
+          <!-- Center Column Middle: Shared SQLite WAL Vault -->
+          <rect x="365" y="124" width="370" height="66" rx="8" fill="#0f2922" stroke="#10b981" stroke-width="1.5" />
+          <text x="382" y="145" fill="#34d399" font-size="11" font-weight="700" font-family="monospace">SHARED CROSS-PROCESS SQLITE WAL (`.mcp-cage/taint.db`)</text>
+          <text x="382" y="163" fill="#d1fae5" font-size="11">• Dual-Lattice Taint: Integrity (T/E/U) × Confidentiality (P/I/C/S)</text>
+          <text x="382" y="179" fill="#d1fae5" font-size="11">• `secret_vault` Table + MELON Provenance + 5-Min Workspace Leases</text>
+
+          <!-- Center Column Bottom: Plane B Native Hooks & SDK -->
+          <rect x="335" y="202" width="430" height="86" rx="10" fill="#1b1630" stroke="#a855f7" stroke-width="1.5" />
+          <text x="352" y="224" fill="#c084fc" font-size="11" font-weight="700" font-family="monospace">PLANE B — `mcp-cage hook` &amp; SDK (Native Tools &amp; Agent Frameworks)</text>
+          <text x="352" y="244" fill="#e2e8f0" font-size="11.5">• Intercepts Native `Bash`, `Read`, `Write`, `Edit`, `WebFetch` Lifecycle Hooks</text>
+          <text x="352" y="262" fill="#e2e8f0" font-size="11.5">• Guards CrewAI (`FileWriterTool`, `CodeInterpreterTool`), Smolagents &amp; Browser-Use</text>
+          <text x="352" y="278" fill="#e2e8f0" font-size="11.5">• Blocks SSRF (`169.254.169.254`), High-Entropy DNS Exfil, Pickle &amp; Pip Injection</text>
+
+          <!-- Right Column: Real Systems & Upstream Servers -->
+          <rect x="835" y="24" width="265" height="262" rx="10" fill="#111827" stroke="#10b981" stroke-width="1.5" />
+          <text x="852" y="50" fill="#34d399" font-size="11" font-weight="700" font-family="monospace">3. PROTECTED REAL SYSTEMS</text>
+          <text x="852" y="74" fill="#f8fafc" font-size="12.5" font-weight="700">Cloud, Data, SaaS &amp; OS</text>
+          <text x="852" y="96" fill="#cbd5e1" font-size="11">• Cloud Run / GKE / Cloudflare / ArgoCD</text>
+          <text x="852" y="116" fill="#cbd5e1" font-size="11">• Snowflake / ClickHouse / DuckDB / FHIR</text>
+          <text x="852" y="136" fill="#cbd5e1" font-size="11">• ServiceNow / Salesforce / PayPal / Stripe</text>
+          <text x="852" y="156" fill="#cbd5e1" font-size="11">• Jupyter / RDKit / Git / Host Filesystem</text>
+          <rect x="850" y="176" width="235" height="94" rx="6" fill="#23121b" stroke="#ef4444" />
+          <text x="862" y="196" fill="#f87171" font-size="10.5" font-weight="700" font-family="monospace">BLOCKED AT WIRE BOUNDARY:</text>
+          <text x="862" y="214" fill="#fecaca" font-size="10.5">✗ Lethal Trifecta Secret Exfil</text>
+          <text x="862" y="231" fill="#fecaca" font-size="10.5">✗ `.vscode`/`.claude`/`SKILL.md` Writes</text>
+          <text x="862" y="248" fill="#fecaca" font-size="10.5">✗ `$(...)`, `--flag`, `../`, Pickle &amp; SQLi</text>
+
+          <!-- Arrows -->
+          <line x1="265" y1="66" x2="333" y2="66" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrBlue)" />
+          <line x1="265" y1="244" x2="333" y2="244" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrBlue)" />
+          <line x1="765" y1="66" x2="833" y2="66" stroke="#10b981" stroke-width="2" marker-end="url(#arrGreen)" />
+          <line x1="765" y1="244" x2="833" y2="244" stroke="#10b981" stroke-width="2" marker-end="url(#arrGreen)" />
+          <line x1="550" y1="112" x2="550" y2="124" stroke="#10b981" stroke-width="2" />
+          <line x1="550" y1="190" x2="550" y2="202" stroke="#10b981" stroke-width="2" />
+        </svg>
+      </div>
+
+      <!-- 6-Sector Coverage Cards -->
+      <div class="sector-grid">
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge blue">SECTOR 1</span>
+            <span style="font-size:11px; color:var(--muted);">Cloud &amp; Kubernetes</span>
+          </div>
+          <h3>Cloud, Serverless &amp; GitOps MCPs</h3>
+          <p>Protects <code>GoogleCloudPlatform/cloud-run-mcp</code>, <code>gke-mcp</code>, <code>cloudflare/mcp-server-cloudflare</code>, and <code>argoproj-labs/mcp-for-argocd</code> against embedded <code>app$(...)</code> command substitution, <code>--kubeconfig</code> flag injection, and REST path-segment traversal.</p>
+        </div>
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge green">SECTOR 2</span>
+            <span style="font-size:11px; color:var(--muted);">Data, Healthcare &amp; FinTech</span>
+          </div>
+          <h3>SQL Warehouses, FHIR &amp; Payment Toolkits</h3>
+          <p>Protects <code>Snowflake-Labs/mcp</code>, <code>ClickHouse/mcp-clickhouse</code>, <code>langcare-mcp-fhir</code>, and <code>paypal/agent-toolkit</code> against comment-split stacked SQLi (<code>DR/**/OP</code>), DuckDB literal breaks, and FHIR/Dispute ID path smuggling.</p>
+        </div>
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge purple">SECTOR 3</span>
+            <span style="font-size:11px; color:var(--muted);">Notebooks &amp; Science</span>
+          </div>
+          <h3>Jupyter Kernels &amp; Cheminformatics</h3>
+          <p>Protects <code>datalayer/jupyter-mcp-server</code> (<code>GHSA-rvjm-7hvp-f868</code>) against runtime endpoint/token repointing and <code>tandemai-inc/rdkit-mcp-server</code> against Python <code>pickle</code> deserialization RCE (<code>CWE-502</code>) while permitting valid <code>0xdeadbeef</code> RDKit molecules.</p>
+        </div>
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge amber">SECTOR 4</span>
+            <span style="font-size:11px; color:var(--muted);">Enterprise CRM &amp; ITSM</span>
+          </div>
+          <h3>ServiceNow, Salesforce &amp; Email Gateways</h3>
+          <p>Protects <code>serac-labs/serac</code> (ServiceNow meta-tool RBAC delegation &amp; OAuth SSRF), <code>smn2gnt/MCP-Salesforce</code> (<code>restful</code> relative path traversal), and <code>nikolausm/imap-mcp-server</code> (host attachment disclosure).</p>
+        </div>
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge red">SECTOR 5</span>
+            <span style="font-size:11px; color:var(--muted);">Beyond MCP Servers</span>
+          </div>
+          <h3>Open-Source Agentic AI Frameworks</h3>
+          <p>Protects non-MCP tools in <code>crewAIInc/crewAI-tools</code> (split <code>directory</code>+<code>filename</code> escape, <code>libraries_used</code> pip injection &amp; <code>SandboxPython</code> dunder escape), <code>huggingface/smolagents</code> (<code>visit_webpage</code> SSRF), and <code>browser-use</code> (<code>browser_exec</code> env harvesting &amp; <code>SKILL.md</code> persistence).</p>
+        </div>
+        <div class="sector-card">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+            <span class="badge blue">SECTOR 6</span>
+            <span style="font-size:11px; color:var(--muted);">Coding IDEs &amp; CLIs</span>
+          </div>
+          <h3>Claude Code, Cursor, Gemini, Codex &amp; <code>agy</code></h3>
+          <p>Blocks <code>CurXecute</code> (<code>CVE-2025-54135</code>), Copilot YOLO (<code>CVE-2025-53773</code>), symlink escapes (<code>CVE-2025-53110</code>), high-entropy DNS exfiltration, and ambient context laundering across native CLI/IDE tool calls.</p>
+        </div>
+      </div>
+
+      <!-- Responsive Sticky Data Table mapping Audited Repos -> Guards -> Regression Suites -->
+      <div tabindex="0" role="region" aria-labelledby="empirical-matrix-caption" class="table-wrapper" style="margin-bottom:22px;">
+        <table>
+          <caption id="empirical-matrix-caption">
+            Empirical Co-Design Coverage Matrix: Real-World Audited MCP Servers &amp; Agentic AI Frameworks (Waves 1–7 + Agent Toolkits)
+          </caption>
+          <thead>
+            <tr>
+              <th>Audited Repository / Target</th>
+              <th>Sector</th>
+              <th>Discovered Vulnerability Class</th>
+              <th>Generalized <code>mcp-cage</code> v0.3.0 Wire Guard</th>
+              <th>Non-Regression Verification Suite</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th><code>datalayer/jupyter-mcp-server</code></th>
+              <td>Notebooks &amp; Kernels</td>
+              <td>Runtime endpoint &amp; token repointing hijack (<code>GHSA-rvjm-7hvp-f868</code>)</td>
+              <td><code>endpoint_repoint_guard</code> / <code>make_endpoint_repoint_guard</code></td>
+              <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
+            </tr>
+            <tr>
+              <th><code>GoogleCloudPlatform/cloud-run-mcp</code></th>
+              <td>Cloud Serverless</td>
+              <td>Embedded POSIX command substitution <code>app$(...)</code> in <code>folderPath</code> (<code>#586725173</code>)</td>
+              <td><code>path_command_substitution_guard</code> + <code>is_safe_workspace_path</code></td>
+              <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
+            </tr>
+            <tr>
+              <th><code>cloudflare/mcp-server-cloudflare</code></th>
+              <td>Edge &amp; CDN</td>
+              <td>REST path-segment traversal in <code>scriptName</code> / <code>account_id</code> (<code>CWE-22</code>)</td>
+              <td><code>url_path_segment_guard</code> (single &amp; double URL-decode)</td>
+              <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
+            </tr>
+            <tr>
+              <th><code>GoogleCloudPlatform/gke-mcp</code> &amp; <code>Flux159/mcp-server-kubernetes</code></th>
+              <td>Kubernetes</td>
+              <td>Positional CLI flag injection (<code>--kubeconfig=</code>, <code>--token=</code>, <code>--template=</code>)</td>
+              <td><code>cli_flag_injection_guard</code></td>
+              <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
+            </tr>
+            <tr>
+              <th><code>Snowflake-Labs/mcp</code> &amp; <code>ClickHouse/mcp-clickhouse</code></th>
+              <td>Data Warehouses</td>
+              <td>Comment-split stacked SQLi (<code>DR/**/OP</code>) &amp; clause/filter injection (<code>CWE-89</code>)</td>
+              <td><code>sql_safety_guard</code> (comment stripping + clause AST checks)</td>
+              <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
+            </tr>
+            <tr>
+              <th><code>langcare/langcare-mcp-fhir</code> &amp; <code>paypal/agent-toolkit</code></th>
+              <td>Healthcare &amp; FinTech</td>
+              <td>FHIR <code>resourceType</code> / PayPal <code>dispute_id</code> REST path &amp; query smuggling</td>
+              <td><code>url_path_segment_guard</code> + <code>REST_RELATIVE_PATH_UNSAFE_RE</code></td>
+              <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
+            </tr>
+            <tr>
+              <th><code>serac-labs/serac</code> &amp; <code>smn2gnt/MCP-Salesforce</code></th>
+              <td>Enterprise ITSM / CRM</td>
+              <td>Meta-tool <code>tool_execute</code> RBAC bypass, OAuth SSRF &amp; <code>restful</code> traversal</td>
+              <td><code>meta_tool_delegation_guard</code> + <code>rest_relative_path_guard</code></td>
+              <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
+            </tr>
+            <tr>
+              <th><code>tandemai-inc/rdkit-mcp-server</code></th>
+              <td>Cheminformatics</td>
+              <td>Base64 Python <code>pickle.loads</code> RCE in <code>pmol</code> / <code>p_query</code> (<code>CWE-502</code>)</td>
+              <td><code>pickle_deserialization_guard</code> (verifies <code>0xdeadbeef</code> RDKit magic)</td>
+              <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
+            </tr>
+            <tr>
+              <th><code>crewAIInc/crewAI-tools</code></th>
+              <td>Agentic AI Framework</td>
+              <td>Split <code>directory</code>+<code>filename</code> escape, <code>libraries_used</code> pip RCE &amp; <code>SandboxPython</code> dunder escape</td>
+              <td>Split path join + <code>package_install_guard</code> + <code>code_sandbox_escape_guard</code></td>
+              <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
+            </tr>
+            <tr>
+              <th><code>huggingface/smolagents</code> &amp; <code>browser-use/browser-use</code></th>
+              <td>Agentic AI Framework</td>
+              <td><code>visit_webpage</code> SSRF, <code>browser_exec</code> process-env harvest &amp; <code>SKILL.md</code> persistence</td>
+              <td><code>make_ssrf_and_dns_guard</code> + <code>code_sandbox_escape_guard</code> + dotfile lock</td>
+              <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Interactive Deep-Dive Guide Accordion per modern-web-guidance `accordion` -->
+      <section class="accordion" id="deep-dive-accordion" aria-labelledby="deep-dive-heading">
+        <div class="accordion-header-bar">
+          <h3 id="deep-dive-heading" style="margin:0; font-size:16px; color:var(--text-bright); text-transform:none; letter-spacing:0;">
+            Interactive Deep-Dive Engineering Notes (Click Any Topic or Expand All)
+          </h3>
+          <button type="button" class="toggle-all-btn" commandfor="deep-dive-accordion" command="--toggle-all" aria-expanded="false">
+            <span class="expand">Expand all deep-dives</span>
+            <span class="collapse">Collapse all deep-dives</span>
+          </button>
+        </div>
+
+        <details>
+          <summary>1. Why In-Process Python Decorators Fail &amp; How Out-of-Process Wire + SQLite WAL Solves Split-Brain</summary>
+          <div class="details-inner">
+            <p>
+              In real MCP deployments (Claude Desktop, Cursor, Claude Code, Antigravity <code>agy</code>), each MCP server runs as a <strong>separate OS child process</strong> communicating over <code>stdin</code>/<code>stdout</code> pipes, while native tools (<code>Bash</code>, <code>Read</code>, <code>Write</code>) run inside the host CLI. An in-memory dictionary inside one process cannot see that another process just read <code>.env</code> or ingested an untrusted GitHub issue.
+            </p>
+            <p>
+              <code>mcp-cage</code> solves this by persisting both the product-lattice session state $(\mathcal{I} \times \mathcal{C})$ and the <code>secret_vault</code> placeholder table inside a shared <strong>SQLite WAL database (<code>.mcp-cage/taint.db</code>)</strong> using <code>BEGIN IMMEDIATE</code> atomic transactions and <code>PRAGMA busy_timeout=15000</code>. When Process 1 (e.g. Node.js <code>@modelcontextprotocol/server-filesystem</code>) reads <code>.env</code>, it mints <code>&lt;MCP_REDACTED_OPENAI_KEY_1&gt;</code> and elevates session confidentiality to <code>SECRET</code>. Milliseconds later, when Process 2 (e.g. Slack MCP or native <code>Bash</code>) attempts to egress data, it reads the same WAL state and blocks the exfiltration deterministically.
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary>2. How Dual-Lattice IFC Defeats "Ambient Context Laundering" ( Confirmed Live on Gemini &amp; Claude )</summary>
+          <div class="details-inner">
+            <p>
+              Regex-only or token-only redaction fails against <strong>Ambient Context Laundering</strong>: an LLM that sees a secret or placeholder in its context window can paraphrase, base64-encode, or summarize it into a brand-new string literal (confirmed empirically in our Tier 3 live <code>agy</code> benchmark when <code>gemini-3.8-flash-low</code> rewrote <code>&lt;MCP_REDACTED_OPENAI_KEY_1&gt;</code> into <code>"Diagnostic token: &lt;PLACEHOLDER_TOKEN&gt;"</code>).
+            </p>
+            <p>
+              Because <code>SessionTaintStateMachine</code> tracks monotonic ambient labels across the entire conversation turn—dropping Integrity to <code>UNTRUSTED</code> when external data enters and raising Confidentiality to <code>SECRET</code> when credentials are read—any subsequent call to an <code>EXTERNAL_EGRESS_SINK</code> is paused or blocked regardless of how the LLM rewrites the string arguments.
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary>3. Extending Beyond MCP Servers: Protecting CrewAI, HuggingFace Smolagents &amp; Browser-Use</summary>
+          <div class="details-inner">
+            <p>
+              Many production AI agents invoke tools through Python agent frameworks (<code>crewAIInc/crewAI-tools</code>, <code>huggingface/smolagents</code>, <code>browser-use/browser-use</code>) or native IDE lifecycle hooks rather than standalone MCP servers. Our empirical audit of those open-source repositories revealed framework-specific attack surfaces now blocked out-of-the-box by <code>mcp-cage</code>:
+            </p>
+            <ul>
+              <li><strong>Split Path Arguments (<code>CrewAI FileWriterTool</code>):</strong> Joins <code>directory</code> + <code>filename</code> prior to canonical <code>Path.resolve()</code> checks and blocks writes to <code>.vscode/</code>, <code>.cursor/</code>, <code>.claude/skills/</code>, <code>AGENTS.md</code>, and <code>SKILL.md</code>.</li>
+              <li><strong>Dynamic Pip Package Injection (<code>CrewAI CodeInterpreterTool</code>):</strong> <code>StandardArgGuards.package_install_guard</code> validates <code>libraries_used</code> against strict PEP 508 syntax, blocking shell chaining (<code>numpy; curl ...</code>), malicious index flags (<code>--index-url</code>), and VCS URLs (<code>git+https://...</code>).</li>
+              <li><strong>Python Sandbox &amp; Process-Env Escapes (<code>SandboxPython</code> &amp; <code>browser_exec</code>):</strong> <code>StandardArgGuards.code_sandbox_escape_guard</code> blocks dunder class-hierarchy traversal (<code>__subclasses__</code>, <code>__globals__</code>, <code>BuiltinImporter</code>) and process credential harvesting (<code>BROWSER_USE_API_KEY</code>).</li>
+            </ul>
+          </div>
+        </details>
+
+        <details>
+          <summary>4. Continuous Non-Regression Engineering: 6 Automated Suites in One Command (`run_all_regression_suites.py`)</summary>
+          <div class="details-inner">
+            <p>
+              Every time a new vulnerability wave or framework guard is added to <code>mcp-cage</code>, <code>python3 run_all_regression_suites.py</code> (and GitHub Actions CI) executes 6 comprehensive verification suites in ~4.2 seconds:
+            </p>
+            <pre class="code-box" style="min-height:110px;">python3 run_all_regression_suites.py
+# [PASS] 1. V2.2 Core IFC, WAL Vault, SSRF/DNS &amp; Config Auditor Suite (test_mcp_cage_v21.py)
+# [PASS] 2. v0.3.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)
+# [PASS] 3. 8-Plane End-to-End Security Suite (test_e2e_all_8_planes.py)
+# [PASS] 4. Tier 2 Official Node.js MCP + Live HTTP Canary Suite (test_tier2_real_mcp_and_canary.py)
+# [PASS] 5. Agentic AI Tools (CrewAI/Smolagents/Browser-Use) &amp; Waves 1–7 Non-Regression Suite (test_agentic_ai_tools_and_non_regression.py)
+# [PASS] 6. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)</pre>
+          </div>
+        </details>
+      </section>
     </section>
 
     <!-- 3. INTERACTIVE 8-PLANE SECURITY FEATURE MATRIX -->
@@ -1437,16 +1935,41 @@
       document.addEventListener('command', (event) => {
         if (event.command && event.command.startsWith('--copy')) {
           copyTargetText(event.source, event.target);
+        } else if (event.command === '--toggle-all') {
+          const expand = event.source.getAttribute('aria-expanded') !== 'true';
+          for (const details of event.target.querySelectorAll(':scope > details')) {
+            details.open = expand;
+          }
         }
       }, true);
     } else {
       document.addEventListener('click', (event) => {
         const button = event.target.closest('button[command^="--copy"]');
-        if (!button) return;
-        const target = document.getElementById(button.getAttribute('commandfor'));
-        if (target) copyTargetText(button, target);
+        if (button) {
+          const target = document.getElementById(button.getAttribute('commandfor'));
+          if (target) copyTargetText(button, target);
+          return;
+        }
+        const toggleBtn = event.target.closest('button[command="--toggle-all"]');
+        if (toggleBtn) {
+          const target = document.getElementById(toggleBtn.getAttribute('commandfor'));
+          if (!target) return;
+          const expand = toggleBtn.getAttribute('aria-expanded') !== 'true';
+          for (const details of target.querySelectorAll(':scope > details')) {
+            details.open = expand;
+          }
+        }
       });
     }
+
+    document.addEventListener('toggle', (event) => {
+      if (!event.target.matches('.accordion > details')) return;
+      const accordion = event.target.parentElement;
+      const button = accordion.querySelector(':scope [command="--toggle-all"]');
+      if (!button) return;
+      const items = accordion.querySelectorAll(':scope > details');
+      button.setAttribute('aria-expanded', Array.prototype.every.call(items, (d) => d.open));
+    }, { capture: true });
 
     // =========================================================================
     // 2. INTERACTIVE 5 INTEGRATION MODES EXPLORER
