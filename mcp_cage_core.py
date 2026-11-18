@@ -156,7 +156,7 @@ SENSITIVE_FILE_PATTERNS = re.compile(
 )
 PUBLIC_DOC_PATTERNS = re.compile(r"(?i)(^|/)(readme|license|changelog|contributing)(\.[a-z0-9]+)?$")
 PROTECTED_DOTFILE_WRITE_PATTERNS = re.compile(
-    r"(?i)(^|/)(\.env($|\.)|\.git/|\.vscode/|\.cursor/|\.claude/|claude_desktop_config\.json|claude\.md|\.cursorrules|mcp-cage\.ya?ml|\.mcp-cage/|\.bashrc|\.zshrc|\.profile|\.ssh/|makefile|package\.json)"
+    r"(?i)(^|/)(\.env($|\.)|\.git/|\.vscode/|\.cursor/|\.claude/|\.gemini/|\.codex/|\.agents/|\.opencode/|claude_desktop_config\.json|claude\.md|agents\.md|skill\.md|\.cursorrules|mcp-cage\.ya?ml|\.mcp-cage/|\.bashrc|\.zshrc|\.profile|\.ssh/|makefile|package\.json)"
 )
 
 
@@ -164,6 +164,9 @@ WORKSPACE_PATH_KEYS: tuple[str, ...] = (
     "path",
     "file_path",
     "filePath",
+    "filename",
+    "file_name",
+    "fileName",
     "target_file",
     "targetFile",
     "folderPath",
@@ -260,6 +263,11 @@ def _collect_workspace_paths(args: Mapping[str, Any]) -> list[str]:
             val = src.get(key)
             if isinstance(val, str) and val.strip():
                 found.append(val)
+        # Support split (directory, filename) tool schemas (e.g. CrewAI FileWriterTool)
+        dir_val = src.get("directory") or src.get("dir") or src.get("folder_path") or src.get("folderPath")
+        fname_val = src.get("filename") or src.get("file_name") or src.get("fileName")
+        if isinstance(dir_val, str) and dir_val.strip() and isinstance(fname_val, str) and fname_val.strip():
+            found.append(os.path.join(dir_val.strip(), fname_val.strip()))
         for list_key in ("paths", "files", "folders", "directories"):
             list_val = src.get(list_key)
             if isinstance(list_val, (list, tuple)):
@@ -588,7 +596,19 @@ class StandardArgGuards:
             "ip_or_domain",
             "tracking_number",
             "new_tracking_number",
+            "test_type",
         }
+    )
+    PICKLE_PARAM_KEYS = frozenset({"pmol", "p_mol", "p_query", "pickled_mol", "pickle_data"})
+    PICKLE_ASCII_RE = re.compile(rb"(?:^|[\n(])(?:c(?:posix|nt|os|builtins|subprocess|importlib|sys|operator)\n|\(S['\"])")
+    RDKIT_BINARY_MAGIC = b"\xef\xbe\xad\xde"
+    PACKAGE_INSTALL_KEYS = frozenset(
+        {"libraries_used", "libraries", "packages", "pip_packages", "dependencies", "extra_packages"}
+    )
+    SAFE_PEP508_PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*(?:\[[A-Za-z0-9,._\-]+\])?(?:(?:==|>=|<=|~=|!=|>|<)[A-Za-z0-9.*+_!\-]+)?$")
+    CODE_EXEC_KEYS = frozenset({"code", "python_code", "script"})
+    SANDBOX_ESCAPE_RE = re.compile(
+        r"(?i)(?:__subclasses__|__bases__|__mro__|__globals__|__builtins__|BuiltinImporter|ctypes\.(?:WinDLL|CDLL|windll|cdll)|pty\.spawn|BROWSER_USE_API_KEY)"
     )
     REST_RELATIVE_PATH_TOOL_RE = re.compile(
         r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute)(?:$|[._])"
@@ -835,7 +855,10 @@ class StandardArgGuards:
     def url_path_segment_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
         """Blocks `..`, `%2e%2e`, `/`, `%2f`, `\\`, `?`, and `#` in REST resource identifier parameters (CWE-22)."""
         for key, val in cls._iter_kv_pairs(args):
-            if not cls._is_resource_id_key(key):
+            low_key = key.lower()
+            is_id = cls._is_resource_id_key(key)
+            is_rel_repo_path = low_key in {"artifact_path", "file_path"}
+            if not is_id and not is_rel_repo_path:
                 continue
             values = val if isinstance(val, (list, tuple)) else [val]
             for item in values:
@@ -844,11 +867,92 @@ class StandardArgGuards:
                 decoded_once = urllib.parse.unquote(item)
                 decoded_twice = urllib.parse.unquote(decoded_once)
                 for candidate in (item, decoded_once, decoded_twice):
-                    if cls.URL_PATH_TRAVERSAL_RE.search(candidate):
+                    if is_id and cls.URL_PATH_TRAVERSAL_RE.search(candidate):
                         return (
                             False,
                             f"URL path-segment traversal / delimiter blocked in '{key}' (CWE-22): '{item}'.",
                         )
+                    if is_rel_repo_path and cls.REST_RELATIVE_PATH_UNSAFE_RE.search(candidate):
+                        return (
+                            False,
+                            f"Relative path traversal / smuggling blocked in '{key}' (CWE-22): '{item}'.",
+                        )
+                    if low_key == "artifact_path" and ("?" in candidate or "#" in candidate):
+                        return (
+                            False,
+                            f"URL query/fragment delimiter blocked in '{key}' (CWE-22): '{item}'.",
+                        )
+        return True, "OK"
+
+    @classmethod
+    def pickle_deserialization_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks Python pickle payloads in serialized molecule/object parameters (CWE-502)."""
+        import base64
+
+        for key, val in cls._iter_kv_pairs(args):
+            if key.lower() not in cls.PICKLE_PARAM_KEYS:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                continue
+            try:
+                raw = base64.b64decode(val.strip(), validate=False)
+            except Exception:
+                continue
+            if not raw:
+                continue
+            if raw.startswith(cls.RDKIT_BINARY_MAGIC):
+                continue
+            if (len(raw) >= 2 and raw[0] == 0x80 and 2 <= raw[1] <= 5) or cls.PICKLE_ASCII_RE.search(raw):
+                return (
+                    False,
+                    f"Unsafe Python pickle deserialization payload blocked in '{key}' (CWE-502).",
+                )
+        return True, "OK"
+
+    @classmethod
+    def package_install_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """
+        Blocks command injection, pip CLI flag injection (`--index-url`, `--extra-index-url`, `-f`),
+        and untrusted URL/path specs in dynamic library installation parameters (e.g. CrewAI `libraries_used`).
+        """
+        for key, val in cls._iter_kv_pairs(args):
+            if key.lower() not in cls.PACKAGE_INSTALL_KEYS:
+                continue
+            items: list[Any]
+            if isinstance(val, str):
+                items = [p.strip() for p in val.split(",") if p.strip()]
+            elif isinstance(val, (list, tuple)):
+                items = list(val)
+            else:
+                continue
+            for item in items:
+                if not isinstance(item, str):
+                    continue
+                pkg = item.strip()
+                if not pkg or not cls.SAFE_PEP508_PKG_RE.match(pkg):
+                    return (
+                        False,
+                        f"Unsafe package specification / pip command injection blocked in '{key}' (CWE-78/CWE-88): '{item}'.",
+                    )
+        return True, "OK"
+
+    @classmethod
+    def code_sandbox_escape_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """
+        Blocks Python dunder sandbox-escape chains (`__subclasses__`, `__globals__`, `BuiltinImporter`,
+        `ctypes.WinDLL`) and credential environment harvesting in agent code-interpreter tools.
+        """
+        for key, val in cls._iter_kv_pairs(args):
+            if key.lower() not in cls.CODE_EXEC_KEYS:
+                continue
+            if not isinstance(val, str) or not val.strip():
+                continue
+            match = cls.SANDBOX_ESCAPE_RE.search(val)
+            if match:
+                return (
+                    False,
+                    f"Python sandbox-escape gadget / process-secret harvesting ('{match.group(0)}') blocked in '{key}' (CWE-94).",
+                )
         return True, "OK"
 
     @classmethod
@@ -1916,16 +2020,16 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|get_page|browse|browser|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|get_page|visit_webpage|scrape_website|scrape_element_from_website|browse|browser|browser_use|navigate|http|curl|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
-        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
+        r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|powershell|start_process|run_command|run_shell_command|write_file|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|browser|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
@@ -1933,7 +2037,7 @@ class ToxicFlowGraphAnalyzer:
     )
     NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
     WORKSPACE_FILE_TOOL_RE = re.compile(
-        r"(?i)(?:read_file|read_text_file|read_multiple_files|write_file|edit_file|delete_file|append_file|move_file|copy_file|put_content|patch_content|append_content|deploy_local_folder|container_file_|sos_report|cluster_toolkit|local_folder)"
+        r"(?i)(?:read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|write_file|file_writer_tool|edit_file|delete_file|append_file|move_file|copy_file|put_content|patch_content|append_content|deploy_local_folder|container_file_|sos_report|cluster_toolkit|local_folder)"
     )
 
     @classmethod
@@ -2002,6 +2106,9 @@ class ToxicFlowGraphAnalyzer:
             StandardArgGuards.path_command_substitution_guard,
             StandardArgGuards.cli_flag_injection_guard,
             StandardArgGuards.url_path_segment_guard,
+            StandardArgGuards.pickle_deserialization_guard,
+            StandardArgGuards.package_install_guard,
+            StandardArgGuards.code_sandbox_escape_guard,
             StandardArgGuards.make_attachment_path_guard(workspace_root),
         ]
         if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
