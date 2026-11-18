@@ -554,8 +554,9 @@ class StandardArgGuards:
 
     SHELL_METACHAR_RE = re.compile(r"[;|&`$><]|\$\(")
     DESTRUCTIVE_SQL_RE = re.compile(
-        r"(?i)\b(DROP|DELETE|TRUNCATE|ALTER|GRANT|REVOKE|COPY|INSERT|UPDATE|MERGE|CREATE|EXECUTE\s+IMMEDIATE|CALL|INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE|LOAD\s+DATA|pg_read_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|dblink|xp_cmdshell)\b"
+        r"(?i)\b(DROP|DELETE|TRUNCATE|ALTER|GRANT|REVOKE|COPY|INSERT|UPDATE|MERGE|CREATE|REPLACE\s+INTO|ATTACH\s+DATABASE|DETACH\s+DATABASE|PRAGMA|VACUUM|REINDEX|EXECUTE\s+IMMEDIATE|CALL|INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE|LOAD\s+DATA|pg_read_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|dblink|xp_cmdshell)\b"
     )
+    SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
     SQL_COMMENT_RE = re.compile(r"--[^\n]*|/\*[\s\S]*?\*/")
     SQL_SINGLE_QUOTED_RE = re.compile(r"'(?:[^'\\]|\\.|'')*'")
     SQL_CLAUSE_INJECTION_RE = re.compile(
@@ -846,6 +847,10 @@ class StandardArgGuards:
 
         for key, val in kv_pairs:
             low_k = key.lower()
+            if low_k in {"table_name", "schema_name", "time_column", "metric_column", "dimension_column"}:
+                if isinstance(val, str) and val.strip() and not cls.SQL_IDENTIFIER_RE.match(val.strip()):
+                    return False, f"Unsafe SQL identifier in '{key}' blocked (CWE-89): '{val[:80]}'."
+                continue
             if low_k in {"statement", "sql", "sql_query", "query", "where_clause", "order_by", "filter", "having", "sort_by", "group_by"}:
                 continue
             if not isinstance(val, str) or not val.strip():
@@ -874,7 +879,7 @@ class StandardArgGuards:
         for key, val in cls._iter_kv_pairs(args):
             low_key = key.lower()
             is_id = cls._is_resource_id_key(key)
-            is_rel_repo_path = low_key in {"artifact_path", "file_path"}
+            is_rel_repo_path = low_key in {"artifact_path", "file_path", "relative_path", "fullname"}
             if not is_id and not is_rel_repo_path:
                 continue
             values = val if isinstance(val, (list, tuple)) else [val]
@@ -894,7 +899,7 @@ class StandardArgGuards:
                             False,
                             f"Relative path traversal / smuggling blocked in '{key}' (CWE-22): '{item}'.",
                         )
-                    if low_key == "artifact_path" and ("?" in candidate or "#" in candidate):
+                    if low_key in {"artifact_path", "relative_path", "fullname"} and ("?" in candidate or "#" in candidate):
                         return (
                             False,
                             f"URL query/fragment delimiter blocked in '{key}' (CWE-22): '{item}'.",
@@ -1080,7 +1085,7 @@ class StandardArgGuards:
                     if not ok_net:
                         return False, f"Runtime endpoint re-pointing blocked in '{u_key}' (GHSA-rvjm-7hvp-f868): {net_reason}"
 
-                    if is_repoint_tool or token_entries:
+                    if is_repoint_tool or token_entries or (u_key.lower() == "host" and not allow_repoint):
                         parsed = urllib.parse.urlsplit(u_val if "://" in u_val else f"https://{u_val}")
                         target_host = (parsed.hostname or "").lower()
                         if target_host and target_host not in normalized_trusted:
@@ -2042,7 +2047,7 @@ class ToxicFlowGraphAnalyzer:
     """
 
     UNTRUSTED_REGEX = re.compile(
-        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|webfetch|web_fetch|web_fetch_and_analyze|get_page|visit_webpage|scrape_website|scrape_element_from_website|browse|browser|browser_use|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|read_email|read_channel|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
+        r"(?i)(?:^|[._])(get_issue|list_issues|get_pr|pull_request|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web_search|web|webfetch|web_fetch|web_fetch_and_analyze|get_page|visit_webpage|scrape_website|scrape_element_from_website|browse|browser|browser_use|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|read_email|read_channel|receive_message|scrape|kubectl_logs|get_metadata|zotero_add_item|add_by_url|download_scihub|download_with_fallback)(?:$|[._])"
     )
     PRIVATE_REGEX = re.compile(
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
@@ -2051,11 +2056,11 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection|create[-_]contact[-_]import)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|publish_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection|create[-_]contact[-_]import)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
-        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|execute_query|db_query|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
+        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|execute_query|db_query|db_query_explain|db_table_profile|db_table_stats|db_index_usage|ai_analytics_detect_anomalies|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
     )
     NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
     WORKSPACE_FILE_TOOL_RE = re.compile(
@@ -2135,6 +2140,21 @@ class ToxicFlowGraphAnalyzer:
         ]
         if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
             guards.append(StandardArgGuards.rest_relative_path_guard)
+        if low_tool in {"get_node", "get_node_config", "set_node_config", "get_item", "get_item_config"}:
+            def _named_resource_segment_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+                raw_name = args.get("name")
+                if isinstance(raw_name, str) and raw_name:
+                    d1 = urllib.parse.unquote(raw_name)
+                    d2 = urllib.parse.unquote(d1)
+                    for candidate in (raw_name, d1, d2):
+                        if StandardArgGuards.URL_PATH_TRAVERSAL_RE.search(candidate):
+                            return (
+                                False,
+                                f"URL path-segment traversal / delimiter blocked in 'name' (CWE-22): '{raw_name}'.",
+                            )
+                return True, "OK"
+
+            guards.append(_named_resource_segment_guard)
         if is_egress:
             guards.append(make_ssrf_and_dns_guard(allow_private_hosts=set(trusted_endpoints) if trusted_endpoints else None))
 
@@ -2583,7 +2603,7 @@ class MCPWireGateway:
             # Meta-tool inner dispatch guard: evaluate wrapped `tool_name`/`tool` + `arguments`/`args`
             inner_tool = arguments.get("tool_name") or arguments.get("tool")
             inner_args = arguments.get("arguments") if "arguments" in arguments else arguments.get("args")
-            if tool_name == "tool_execute" and isinstance(inner_tool, str) and inner_tool.strip():
+            if tool_name in {"tool_execute", "call_tool"} and isinstance(inner_tool, str) and inner_tool.strip():
                 inner_profile = self._get_or_build_profile(inner_tool.strip())
                 inner_eval = self.state_machine.on_tool_call(
                     inner_profile,
