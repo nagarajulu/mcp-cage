@@ -608,7 +608,10 @@ class StandardArgGuards:
     SAFE_PEP508_PKG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*(?:\[[A-Za-z0-9,._\-]+\])?(?:(?:==|>=|<=|~=|!=|>|<)[A-Za-z0-9.*+_!\-]+)?$")
     CODE_EXEC_KEYS = frozenset({"code", "python_code", "script"})
     SANDBOX_ESCAPE_RE = re.compile(
-        r"(?i)(?:__subclasses__|__bases__|__base__|__mro__|__globals__|__builtins__|__import__|__getattribute__|__self__|__class__|__code__|__closure__|__reduce__|__reduce_ex__|BuiltinImporter|ctypes\.(?:WinDLL|CDLL|windll|cdll)|pty\.spawn|BROWSER_USE_API_KEY)"
+        r"(?i)(?:__subclasses__|__bases__|__base__|__mro__|__globals__|__builtins__|__import__|__getattribute__|__self__|__class__|__code__|__closure__|__reduce__|__reduce_ex__|BuiltinImporter|ctypes\.(?:WinDLL|CDLL|windll|cdll)|pty\.spawn|asyncio\.(?:create_subprocess_(?:exec|shell)|subprocess)|BROWSER_USE_API_KEY)"
+    )
+    KUBECTL_DRY_RUN_BYPASS_RE = re.compile(
+        r"(?i)(?:^|\s)kubectl(?:\.exe|\.[0-9.]+)?\b[^\n]*(?:--dry-run=(?:none|false)\b|--dry-run\s+(?:none|false)\b)"
     )
     REST_RELATIVE_PATH_TOOL_RE = re.compile(
         r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute)(?:$|[._])"
@@ -957,6 +960,11 @@ class StandardArgGuards:
         `ctypes.WinDLL`) and credential environment harvesting in agent code-interpreter tools.
         """
         for key, val in cls._iter_kv_pairs(args):
+            if key.lower() == "command" and isinstance(val, str) and cls.KUBECTL_DRY_RUN_BYPASS_RE.search(val):
+                return (
+                    False,
+                    "Disabling kubectl dry-run (`--dry-run=none` / `--dry-run=false`) in command blocked (CWE-863).",
+                )
             if key.lower() not in cls.CODE_EXEC_KEYS:
                 continue
             if not isinstance(val, str) or not val.strip():
@@ -2040,10 +2048,10 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection|create[-_]contact[-_]import)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
