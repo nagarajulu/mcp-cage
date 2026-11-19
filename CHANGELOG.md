@@ -32,23 +32,23 @@ Derived directly from security audits of real-world public and Big-Tech MCP serv
    - *Empirical Lineage:* `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`).
    - *Protection:* Fail-closed blocking of runtime connection-mutation tools (`connect_to_*`, `switch_server`, `set_endpoint`, `configure_connection`, etc.) unless explicitly opted in (`allow_endpoint_repoint=True`, `trusted_endpoints=...`), and blocking mid-session `*_url` + `*_token`/`*_key` parameter pairs, raw bearer tokens in LLM context, and re-pointing to `local`, `localhost`, `127.0.0.1`, `169.254.169.254`, or RFC1918 networks.
 2. **Embedded POSIX Command Substitution Guard in File/Folder Paths (`path_command_substitution_guard` + hardened `is_safe_workspace_path` / `make_workspace_path_guard`)**
-   - *Empirical Lineage:* `GoogleCloudPlatform/cloud-run-mcp` (`source-processor.js`, Issue `#586725173`).
+   - *Empirical Lineage:* Cloud Serverless & Container Deployment MCP Servers (`CWE-78` embedded subshell in path).
    - *Protection:* Inspects all path/directory/folder parameters (`folderPath`, `filePath`, `source_dir`, `app_dir`, `working_directory`, `download_directory`, `destination`, `path`, `file_path`, etc.) for embedded POSIX command substitution (`$(...)`, backticks `` `...` ``, `${...}`, `\x00`) even when disguised inside a valid relative/workspace path segment, in addition to `Path.resolve()` workspace confinement and protected dotfile locks.
 3. **REST URL Path-Segment Traversal Guard (`url_path_segment_guard`)**
-   - *Empirical Lineage:* `cloudflare/mcp-server-cloudflare`.
+   - *Empirical Lineage:* Edge & API Gateway MCP Servers (`CWE-22` REST path-segment traversal).
    - *Protection:* Deterministically inspects resource identifier parameters (`*_id`, `*Id`, `*Name`, `*_name`, `scriptName`, `job_id`, `session_id`, `rag_id`, `bucket`, `repo`, etc., including nested payloads and URL-decoded/double-encoded variants) and blocks `..`, `%2e%2e`, `/`, `%2f`, `\`, `%5c`, `?`, and `#` before REST URL interpolation (`CWE-22`).
 4. **CLI Positional-Argument Flag Injection Guard (`cli_flag_injection_guard`)**
-   - *Empirical Lineage:* `GoogleCloudPlatform/gke-mcp` & `Flux159/mcp-server-kubernetes`.
+   - *Empirical Lineage:* Kubernetes & Infrastructure CLI MCP Servers (`CWE-88` positional flag injection).
    - *Protection:* Blocks leading `-` / `--` flags (`--upload-pack=`, `--template=`, `--kubeconfig=`, `--token=`, `--output=`, `-o...`) and embedded `--flag` tokens injected into positional resource, directory, git, or target arguments (`CWE-88`).
 5. **Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard`)**
-   - *Empirical Lineage:* `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql`.
+   - *Empirical Lineage:* Enterprise Data Warehouse & Relational SQL MCP Servers (`CWE-89` comment-split & clause injection).
    - *Protection:* Strips `-- ...` and `/* ... */` SQL comments (both space-joined and compact to defeat `DR/**/OP` token splitting), rejects unclosed block comments, detects stacked `;` queries (while respecting string literals), and enforces clause-level SQL injection checks across `where_clause`, `order_by`, `filter`, `having`, `sort_by`, and `group_by` (`A4.3` / `A8.1`).
 6. **Unified Zero-Config Wire Enforcement & Regression Suite (`test_mcp_cage_v30_empirical_guards.py` & `test_agentic_ai_tools_and_non_regression.py`)**
    - Wired all empirical guards into `ToxicFlowGraphAnalyzer.build_default_profile`, `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy` (`mcp_cage_cli.py`), and Plane B native hooks (`_build_native_hook_profile`).
    - Added **Open-Source Agentic AI Framework & Wave 4–7 Guards**:
-     - `pickle_deserialization_guard` (`tandemai-inc/rdkit-mcp-server`, `CWE-502` with `0xdeadbeef` RDKit binary allowlist).
-     - `package_install_guard` (`crewAIInc/crewAI-tools` `CodeInterpreterTool` `libraries_used` PEP 508 validation blocking pip command/flag/URL injection).
-     - `code_sandbox_escape_guard` (`crewAIInc/crewAI-tools` `SandboxPython` dunder `__subclasses__` escape & `browser-use` `browser_exec` `BROWSER_USE_API_KEY` process-env harvesting).
+     - `pickle_deserialization_guard` (Scientific Cheminformatics MCP Servers, `CWE-502` with `0xdeadbeef` RDKit binary allowlist).
+     - `package_install_guard` (Multi-Agent Python Toolkits `CodeInterpreterTool` `libraries_used` PEP 508 validation blocking pip command/flag/URL injection).
+     - `code_sandbox_escape_guard` (Multi-Agent Python Toolkits `SandboxPython` dunder `__subclasses__` escape & Browser Agent Harnesses `browser_exec` `BROWSER_USE_API_KEY` process-env harvesting).
      - Split `(directory, filename)` path joining & Agent Skill (`SKILL.md`, `AGENTS.md`, `.claude/skills/`, `.agents/`) write protection.
      - Single-command 6-suite non-regression runner (`run_all_regression_suites.py`).
 

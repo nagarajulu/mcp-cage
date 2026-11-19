@@ -5,11 +5,11 @@ Agentic AI Tools & Cross-Version Non-Regression Test Suite
 
 Covers two critical mandates:
 1. Open-Source Agentic AI Frameworks Beyond Standalone MCP Servers:
-   - `crewAIInc/crewAI-tools` (`FileWriterTool` split `directory`+`filename` traversal,
+   - Multi-Agent Python Toolkits (`FileWriterTool` split `directory`+`filename` traversal,
      `CodeInterpreterTool` `libraries_used` pip command/flag injection & `SandboxPython` dunder escape,
      `ScrapeWebsiteTool` `website_url` SSRF, `FileReadTool` -> `ScrapeWebsiteTool` Lethal Trifecta)
-   - `huggingface/smolagents` (`visit_webpage` SSRF & untrusted taint, `python_interpreter` sandbox escape)
-   - `browser-use/browser-use` (`browser_exec` `BROWSER_USE_API_KEY` process-env harvesting &
+   - CodeAgent Web & Interpreter Toolkits (`visit_webpage` SSRF & untrusted taint, `python_interpreter` sandbox escape)
+   - Autonomous Browser Agent MCP Harnesses (`browser_exec` `BROWSER_USE_API_KEY` process-env harvesting &
      `SKILL.md` / `.claude/skills/` / `.agents/skills/` persistence protection)
 2. Cross-Version Non-Regression Contract (Waves 1–7 + Zero False Positives + Stdlib Purity + Latency):
    - Ensures future sessions or contributors cannot break any historical guard (Jupyter, Cloud Run,
@@ -83,7 +83,7 @@ class TestAgenticAiToolsAndNonRegression(unittest.TestCase):
         return self.engine.process_client_to_server(msg)
 
     # =========================================================================
-    # 1. CrewAI (`crewAIInc/crewAI-tools`) Empirical Findings & Defenses
+    # 1. CrewAI (Multi-Agent Python Toolkits) Empirical Findings & Defenses
     # =========================================================================
     def test_01_crewai_file_writer_split_directory_and_filename_guard(self) -> None:
         """
@@ -167,7 +167,7 @@ class TestAgenticAiToolsAndNonRegression(unittest.TestCase):
         """
         CrewAI `SandboxPython` leaves `object` in `safe_builtins()`, allowing
         `().__class__.__base__.__subclasses__()` host RCE when Docker is absent.
-        `browser-use` `browser_exec` runs in the server's process with `BROWSER_USE_API_KEY` in `os.environ`.
+        Browser Agent Harnesses `browser_exec` runs in the server's process with `BROWSER_USE_API_KEY` in `os.environ`.
         Verifies `code_sandbox_escape_guard` blocks both while allowing normal Python snippets.
         """
         # 1. Dunder subclass gadget escape

@@ -1146,7 +1146,7 @@
             <span style="font-size:11px; color:var(--muted);">Cloud &amp; Kubernetes</span>
           </div>
           <h3>Cloud, Serverless &amp; GitOps MCPs</h3>
-          <p>Protects <code>GoogleCloudPlatform/cloud-run-mcp</code>, <code>gke-mcp</code>, <code>cloudflare/mcp-server-cloudflare</code>, and <code>argoproj-labs/mcp-for-argocd</code> against embedded <code>app$(...)</code> command substitution, <code>--kubeconfig</code> flag injection, and REST path-segment traversal.</p>
+          <p>Protects <code>Cloud Container Deployment MCPs (CWE-78)</code>, <code>Kubernetes CLI MCPs</code>, <code>Edge &amp; API Gateway MCPs (CWE-22)</code>, and <code>GitOps Deployment MCPs</code> against embedded <code>app$(...)</code> command substitution, <code>--kubeconfig</code> flag injection, and REST path-segment traversal.</p>
         </div>
         <div class="sector-card">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
@@ -1154,7 +1154,7 @@
             <span style="font-size:11px; color:var(--muted);">Data, Healthcare &amp; FinTech</span>
           </div>
           <h3>SQL Warehouses, FHIR &amp; Payment Toolkits</h3>
-          <p>Protects <code>Snowflake-Labs/mcp</code>, <code>ClickHouse/mcp-clickhouse</code>, <code>langcare-mcp-fhir</code>, and <code>paypal/agent-toolkit</code> against comment-split stacked SQLi (<code>DR/**/OP</code>), DuckDB literal breaks, and FHIR/Dispute ID path smuggling.</p>
+          <p>Protects <code>Enterprise SQL Data Warehouses</code>, <code>Healthcare FHIR APIs</code>, and <code>Financial Payment Toolkits</code> against comment-split stacked SQLi (<code>DR/**/OP</code>), DuckDB literal breaks, and FHIR/Dispute ID path smuggling.</p>
         </div>
         <div class="sector-card">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
@@ -1162,7 +1162,7 @@
             <span style="font-size:11px; color:var(--muted);">Notebooks &amp; Science</span>
           </div>
           <h3>Jupyter Kernels &amp; Cheminformatics</h3>
-          <p>Protects <code>datalayer/jupyter-mcp-server</code> (<code>GHSA-rvjm-7hvp-f868</code>) against runtime endpoint/token repointing and <code>tandemai-inc/rdkit-mcp-server</code> against Python <code>pickle</code> deserialization RCE (<code>CWE-502</code>) while permitting valid <code>0xdeadbeef</code> RDKit molecules.</p>
+          <p>Protects <code>datalayer/jupyter-mcp-server</code> (<code>GHSA-rvjm-7hvp-f868</code>) against runtime endpoint/token repointing and <code>Scientific Cheminformatics MCPs (CWE-502)</code> against Python <code>pickle</code> deserialization RCE (<code>CWE-502</code>) while permitting valid <code>0xdeadbeef</code> RDKit molecules.</p>
         </div>
         <div class="sector-card">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
@@ -1178,7 +1178,7 @@
             <span style="font-size:11px; color:var(--muted);">Beyond MCP Servers</span>
           </div>
           <h3>Open-Source Agentic AI Frameworks</h3>
-          <p>Protects non-MCP tools in <code>crewAIInc/crewAI-tools</code> (split <code>directory</code>+<code>filename</code> escape, <code>libraries_used</code> pip injection &amp; <code>SandboxPython</code> dunder escape), <code>huggingface/smolagents</code> (<code>visit_webpage</code> SSRF), and <code>browser-use</code> (<code>browser_exec</code> env harvesting &amp; <code>SKILL.md</code> persistence).</p>
+          <p>Protects non-MCP tools in <code>Multi-Agent Code &amp; File Toolkits</code> (split <code>directory</code>+<code>filename</code> escape, <code>libraries_used</code> pip injection &amp; <code>SandboxPython</code> dunder escape), <code>Web Scraper Agent Toolkits</code> (<code>visit_webpage</code> SSRF), and <code>Browser Agent Harnesses</code> (<code>browser_exec</code> env harvesting &amp; <code>SKILL.md</code> persistence).</p>
         </div>
         <div class="sector-card">
           <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
@@ -1214,28 +1214,28 @@
               <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
             </tr>
             <tr>
-              <th><code>GoogleCloudPlatform/cloud-run-mcp</code></th>
+              <th><code>Cloud Container Deployment MCPs (CWE-78)</code></th>
               <td>Cloud Serverless</td>
               <td>Embedded POSIX command substitution <code>app$(...)</code> in <code>folderPath</code> (<code>#586725173</code>)</td>
               <td><code>path_command_substitution_guard</code> + <code>is_safe_workspace_path</code></td>
               <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
             </tr>
             <tr>
-              <th><code>cloudflare/mcp-server-cloudflare</code></th>
+              <th><code>Edge &amp; API Gateway MCPs (CWE-22)</code></th>
               <td>Edge &amp; CDN</td>
               <td>REST path-segment traversal in <code>scriptName</code> / <code>account_id</code> (<code>CWE-22</code>)</td>
               <td><code>url_path_segment_guard</code> (single &amp; double URL-decode)</td>
               <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
             </tr>
             <tr>
-              <th><code>GoogleCloudPlatform/gke-mcp</code> &amp; <code>Flux159/mcp-server-kubernetes</code></th>
+              <th><code>Kubernetes &amp; Infra CLI MCPs (CWE-88)</code></th>
               <td>Kubernetes</td>
               <td>Positional CLI flag injection (<code>--kubeconfig=</code>, <code>--token=</code>, <code>--template=</code>)</td>
               <td><code>cli_flag_injection_guard</code></td>
               <td><code>test_mcp_cage_v30_empirical_guards.py</code></td>
             </tr>
             <tr>
-              <th><code>Snowflake-Labs/mcp</code> &amp; <code>ClickHouse/mcp-clickhouse</code></th>
+              <th><code>Data Warehouse &amp; Analytics SQL MCPs (CWE-89)</code></th>
               <td>Data Warehouses</td>
               <td>Comment-split stacked SQLi (<code>DR/**/OP</code>) &amp; clause/filter injection (<code>CWE-89</code>)</td>
               <td><code>sql_safety_guard</code> (comment stripping + clause AST checks)</td>
@@ -1256,21 +1256,21 @@
               <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
             </tr>
             <tr>
-              <th><code>tandemai-inc/rdkit-mcp-server</code></th>
+              <th><code>Scientific Cheminformatics MCPs (CWE-502)</code></th>
               <td>Cheminformatics</td>
               <td>Base64 Python <code>pickle.loads</code> RCE in <code>pmol</code> / <code>p_query</code> (<code>CWE-502</code>)</td>
               <td><code>pickle_deserialization_guard</code> (verifies <code>0xdeadbeef</code> RDKit magic)</td>
               <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
             </tr>
             <tr>
-              <th><code>crewAIInc/crewAI-tools</code></th>
+              <th><code>Multi-Agent Code &amp; File Toolkits</code></th>
               <td>Agentic AI Framework</td>
               <td>Split <code>directory</code>+<code>filename</code> escape, <code>libraries_used</code> pip RCE &amp; <code>SandboxPython</code> dunder escape</td>
               <td>Split path join + <code>package_install_guard</code> + <code>code_sandbox_escape_guard</code></td>
               <td><code>test_agentic_ai_tools_and_non_regression.py</code></td>
             </tr>
             <tr>
-              <th><code>huggingface/smolagents</code> &amp; <code>browser-use/browser-use</code></th>
+              <th><code>Autonomous Web &amp; Browser Agent Harnesses</code></th>
               <td>Agentic AI Framework</td>
               <td><code>visit_webpage</code> SSRF, <code>browser_exec</code> process-env harvest &amp; <code>SKILL.md</code> persistence</td>
               <td><code>make_ssrf_and_dns_guard</code> + <code>code_sandbox_escape_guard</code> + dotfile lock</td>
@@ -1320,7 +1320,7 @@
           <summary>3. Extending Beyond MCP Servers: Protecting CrewAI, HuggingFace Smolagents &amp; Browser-Use</summary>
           <div class="details-inner">
             <p>
-              Many production AI agents invoke tools through Python agent frameworks (<code>crewAIInc/crewAI-tools</code>, <code>huggingface/smolagents</code>, <code>browser-use/browser-use</code>) or native IDE lifecycle hooks rather than standalone MCP servers. Our empirical audit of those open-source repositories revealed framework-specific attack surfaces now blocked out-of-the-box by <code>mcp-cage</code>:
+              Many production AI agents invoke tools through Python agent frameworks (<code>Multi-Agent Code &amp; File Toolkits</code>, <code>Web Scraper Agent Toolkits</code>, <code>Browser Automation Agent Harnesses</code>) or native IDE lifecycle hooks rather than standalone MCP servers. Our empirical audit of those open-source repositories revealed framework-specific attack surfaces now blocked out-of-the-box by <code>mcp-cage</code>:
             </p>
             <ul>
               <li><strong>Split Path Arguments (<code>CrewAI FileWriterTool</code>):</strong> Joins <code>directory</code> + <code>filename</code> prior to canonical <code>Path.resolve()</code> checks and blocks writes to <code>.vscode/</code>, <code>.cursor/</code>, <code>.claude/skills/</code>, <code>AGENTS.md</code>, and <code>SKILL.md</code>.</li>

@@ -71,7 +71,7 @@ Each `mcp-cage` release translates real-world vulnerability classes uncovered ac
 | :--- | :--- | :--- | :--- |
 | **`v0.1.0`** | Dual-Lattice IFC & Wire Prototype | Invariant Labs GitHub MCP Exploit, `MCPTox`, Microsoft Spotlighting, `MELON` | `SessionTaintStateMachine`, `SchemaLockVerifier` (`mcp-lock.json`), randomized datamarking boundaries, `ToxicFlowGraphAnalyzer` (`mcp-sploit`). |
 | **`v0.2.2`** | Cross-Process WAL & Dual-Plane Firewall | `CVE-2025-53110`, `CVE-2025-53773` (Copilot YOLO), `CVE-2025-54135` (`CurXecute`), AWS IMDSv1 SSRF, DNS exfiltration | Shared SQLite WAL `BidirectionalSecretScrubber`, `BEGIN IMMEDIATE` atomic taint, `validate_outbound_network_target` (IMDS/RFC1918/Shannon DNS), `WorkspaceMCPConfigAuditor`, Plane A + Plane B hooks. |
-| **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), `GoogleCloudPlatform/cloud-run-mcp` (`#586725173`), `cloudflare/mcp-server-cloudflare`, `GoogleCloudPlatform/gke-mcp` & `Flux159/mcp-server-kubernetes`, `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql` | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
+| **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), Cloud Container Deployment MCP Servers (`CWE-78`), Edge & API Gateway MCP Servers (`CWE-22` REST path-segment traversal), Kubernetes & Infrastructure CLI MCP Servers (`CWE-88` positional flag injection), Enterprise Data Warehouse & Relational SQL MCP Servers (`CWE-89` comment-split & clause injection) | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
 | **`v0.4.0`** | Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Compiler | Day-0 Non-Collision Tool-Provider Misbinding, Cross-Session Stored XPIA (`CLAUDE.md`), `OverServe` Resource Amplification ($93.88\times$), EFF Diceware Covert Identifiers, Missing OS Kernel Containment | `WireDIFCCanonicalizer` (`S_poison >= 0.45` + 4-Slot Canonicalizer), `PersistentLineSpanProvenance` (`persistent_span_taint`), `DestinationBoundFPEVault`, `CausalStateProgressGovernor`, `SchemaToKernelSandboxCompiler` (`mcp-cage compile-sandbox` Seatbelt SBPL / Landlock), `mcp-cage bench`. |
 
 ---
@@ -94,6 +94,10 @@ mcp-cage audit-config
 
 # 4. Run static Toxic-Flow Graph Analysis (mcp-sploit)
 mcp-sploit audit
+
+# 5. Day-1 Zero-Friction Onboarding: Start in '--mode shadow' (logs alerts to .mcp-cage/audit.jsonl without blocking)
+#    then switch to '--mode enforce' once verified in your workflow:
+mcp-cage wrap --server filesystem --workspace . --mode shadow -- npx -y @modelcontextprotocol/server-filesystem .
 ```
 
 ---

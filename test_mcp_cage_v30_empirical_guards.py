@@ -4,10 +4,10 @@ Empirical Guard Regression & Latency Test Suite for `mcp-cage v0.3.0` (`test_mcp
 Tests all 5 real-world vulnerability classes uncovered across audited public and Big-Tech MCP servers,
 verified end-to-end through `MCPCageEngine` (`MCPWireGateway`) with zero manual configuration:
   1. Runtime Endpoint & Session Re-pointing (`endpoint_repoint_guard` — `GHSA-rvjm-7hvp-f868` in `datalayer/jupyter-mcp-server`)
-  2. Embedded POSIX Command Substitution in File/Folder Paths (`GoogleCloudPlatform/cloud-run-mcp` Issue `#586725173`)
-  3. REST URL Path-Segment Traversal (`url_path_segment_guard` — `cloudflare/mcp-server-cloudflare`)
-  4. CLI Positional-Argument Flag Injection (`cli_flag_injection_guard` — `GoogleCloudPlatform/gke-mcp` & `Flux159/mcp-server-kubernetes`)
-  5. Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard` — `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql`)
+  2. Embedded POSIX Command Substitution in File/Folder Paths (Cloud Container Deployment MCP Servers (`CWE-78`))
+  3. REST URL Path-Segment Traversal (`url_path_segment_guard` — Edge & API Gateway MCP Servers (`CWE-22` REST path-segment traversal))
+  4. CLI Positional-Argument Flag Injection (`cli_flag_injection_guard` — Kubernetes & Infrastructure CLI MCP Servers (`CWE-88` positional flag injection))
+  5. Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard` — Enterprise Data Warehouse & Relational SQL MCP Servers (`CWE-89` comment-split & clause injection))
   6. Sub-millisecond (< 1.0 ms) deterministic guard latency verification.
 """
 
