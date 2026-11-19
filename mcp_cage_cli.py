@@ -421,11 +421,33 @@ def main() -> int:
     gen_p.add_argument("--workspace", default=".", help="Workspace root path")
     gen_p.add_argument("--output-dir", default=".", help="Directory to write example config files")
 
+    cs_p = subparsers.add_parser("compile-sandbox", help="Compile MCP schema into macOS Seatbelt SBPL or Linux bwrap/Landlock profile")
+    cs_p.add_argument("--workspace", default=".", help="Workspace root path")
+    cs_p.add_argument("--os", choices=["auto", "macos", "linux"], default="auto", help="Target OS kernel")
+    cs_p.add_argument("--allow-network", action="store_true", help="Allow outbound network sockets in kernel profile")
+    cs_p.add_argument("--output", default=None, help="Output file path for kernel profile")
+
+    bench_p = subparsers.add_parser("bench", help="Execute 800-scenario MCP-SecBench & Live Ecological evaluation suite")
+    bench_p.add_argument("--suite-dir", default=None, help="Optional suite directory")
+
     parsed = parser.parse_args()
     if parsed.subcommand == "wrap":
         return run_stdio_wrapper(parsed)
     if parsed.subcommand == "generate-config":
         return generate_configs(parsed)
+    if parsed.subcommand == "compile-sandbox":
+        from mcp_cage_core import run_compile_sandbox_cli
+
+        return run_compile_sandbox_cli(
+            workspace=parsed.workspace,
+            target_os=parsed.os,
+            allow_network=parsed.allow_network,
+            output_path=parsed.output,
+        )
+    if parsed.subcommand == "bench":
+        from mcp_cage_core import run_secbench_cli
+
+        return run_secbench_cli(suite_dir=parsed.suite_dir)
     return 1
 
 

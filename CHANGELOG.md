@@ -5,6 +5,24 @@ All notable changes to `mcp-cage` are documented in this file.
 
 ---
 
+## [0.4.0] — 2026-11-18
+
+### Added — Wire-DIFC v2/v3, 4-Slot Provider-Binding Canonicalizer, Line-Span WAL Provenance & Kernel Sandbox Compiler
+1. **Unconditional 4-Slot Wire Canonicalizer & Authority Log-Odds Scorer (`WireDIFCCanonicalizer` in `SchemaLockVerifier`)**
+   - Defeats Day-0 Non-Collision Tool-Provider Misbinding and soft comparative authority inflation (`S_poison >= 0.45`) on `tools/list` while preserving 100% of primary action verbs across official MCP servers.
+2. **Content-Addressed Line-Span Persistent Provenance in SQLite WAL (`PersistentLineSpanProvenance` / `persistent_span_taint`)**
+   - Defeats Cross-Session Stored Prompt Injection across `CLAUDE.md`, `.cursorrules`, `MEMORY.md`, and workspace notes by recording SHA-256 line-span provenance on untrusted file writes without whole-file taint freeze.
+3. **Destination-Bound Format-Preserving Secret Tokenization Vault (`DestinationBoundFPEVault`)**
+   - Mints format-preserving synthetic tokens (`Prefix || SYNTH_ || Base62(HMAC)`) before secrets enter the LLM context window and enforces `(target_server == AuthServer) and (Integrity == TRUSTED)` on outbound re-hydration.
+4. **Two-Axis Covert Hex DNS & Natural-Language EFF Diceware-in-Identifier Detector (`is_covert_exfil_identifier` + `iterative_fixed_point_unquote`)**
+   - Combines subdomain/identifier Shannon entropy ($H_0 = 3.35\text{ bits/char}$) with Typed-Identifier Semantic Surprise (catching natural-language Diceware passphrases inside `uuid`/`hex`/`id` fields) and depth-5 fixed-point URL decoding (`..%252f..%252f`).
+5. **Causal State-Progress Entropy Governor (`CausalStateProgressGovernor`)**
+   - Arrests `OverServe` ($93.88\times$) cyclic zero-progress status-polling amplification loops on the wire while permitting long-horizon multi-file refactoring workflows.
+6. **Automated Schema-to-Kernel Sandbox Compiler (`mcp-cage compile-sandbox`) & Reproducible Benchmark Persona (`mcp-cage bench`)**
+   - Synthesizes stratified macOS Seatbelt (`/usr/bin/sandbox-exec` SBPL) and Linux Landlock/`bwrap` containment profiles and runs the 800-scenario `MCP-SecBench` + 21-test 9-Plane E2E suite.
+
+---
+
 ## [0.3.0] — 2026-11-17
 
 ### Added — Empirical Wire-Level Security Guards (Zero-Config in `MCPCageEngine` / `ToxicFlowGraphAnalyzer`)

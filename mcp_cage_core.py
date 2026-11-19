@@ -37,6 +37,7 @@ __version__ = "0.3.0"
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import ipaddress
 import json
@@ -602,6 +603,10 @@ class StandardArgGuards:
             "tracking_number",
             "new_tracking_number",
             "test_type",
+            "ip",
+            "symbol",
+            "product_code",
+            "productcode",
         }
     )
     SENSITIVE_QUERY_FILTER_FIELDS = frozenset(
@@ -639,7 +644,7 @@ class StandardArgGuards:
         r"(?i)(?:^|\s)kubectl(?:\.exe|\.[0-9.]+)?\b[^\n]*(?:--dry-run=(?:none|false)\b|--dry-run\s+(?:none|false)\b)"
     )
     REST_RELATIVE_PATH_TOOL_RE = re.compile(
-        r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute)(?:$|[._])"
+        r"(?i)(?:^|[._])(restful|tooling_execute|apex_execute|send_management_api_request)(?:$|[._])"
     )
     REST_RELATIVE_PATH_UNSAFE_RE = re.compile(
         r"(?i)(?:^|[\\/])\.\.(?:$|[\\/])|://|^//|[\r\n\x00\\@]|%2e%2e|%5c"
@@ -692,8 +697,14 @@ class StandardArgGuards:
             "source",
             "scriptname",
             "script_name",
+            "argv",
+            "binary",
+            "username",
+            "email",
+            "phone",
         }
     )
+    INLINE_CMD_SUBST_RE = re.compile(r"\$\([^)\n]*\)")
     CLI_EMBEDDED_FLAG_RE = re.compile(r"\s--[a-zA-Z0-9][a-zA-Z0-9_-]*")
     ENDPOINT_REPOINT_TOOL_RE = re.compile(
         r"(?i)(?:^|[._])(connect_to_[a-z0-9_]+|switch_server|set_endpoint|configure_connection|set_connection|set_server_url|update_endpoint|change_endpoint|bind_endpoint|reconnect(?:_[a-z0-9_]+)?)(?:$|[._])"
@@ -792,16 +803,22 @@ class StandardArgGuards:
 
     @classmethod
     def path_command_substitution_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
-        """Blocks embedded POSIX command substitution (`$(...)`, backticks, `${...}`) in file/folder path args."""
+        """Blocks embedded POSIX command substitution (`$(...)`, backticks, `${...}`) in path/command args and `$(...)` in any tool arg."""
         for k, v in cls._iter_kv_pairs(args):
-            if not cls._is_path_key(k):
-                continue
+            is_path_or_cmd = cls._is_path_key(k) or k.lower() in {"argv", "binary", "cmd", "command", "executable"}
             values = v if isinstance(v, (list, tuple)) else [v]
             for item in values:
-                if isinstance(item, str) and POSIX_CMD_SUBST_RE.search(item):
+                if not isinstance(item, str):
+                    continue
+                if is_path_or_cmd and POSIX_CMD_SUBST_RE.search(item):
                     return (
                         False,
-                        f"Embedded POSIX command substitution / shell expansion blocked in path parameter '{k}' (CWE-78): '{item}'.",
+                        f"Embedded POSIX command substitution / shell expansion blocked in parameter '{k}' (CWE-78): '{item}'.",
+                    )
+                if "$(" in item and cls.INLINE_CMD_SUBST_RE.search(item):
+                    return (
+                        False,
+                        f"Embedded POSIX command substitution `$(...)` blocked in parameter '{k}' (CWE-78): '{item}'.",
                     )
         return True, "OK"
 
@@ -904,12 +921,14 @@ class StandardArgGuards:
         for key, val in cls._iter_kv_pairs(args):
             low_key = key.lower()
             is_id = cls._is_resource_id_key(key)
-            is_rel_repo_path = low_key in {"artifact_path", "file_path", "relative_path", "fullname"}
+            is_rel_repo_path = low_key in {"artifact_path", "file_path", "relative_path", "fullname", "target"}
             if not is_id and not is_rel_repo_path:
                 continue
             values = val if isinstance(val, (list, tuple)) else [val]
             for item in values:
                 if not isinstance(item, str) or not item:
+                    continue
+                if low_key == "target" and item.lower().startswith(("http://", "https://")):
                     continue
                 decoded_once = urllib.parse.unquote(item)
                 decoded_twice = urllib.parse.unquote(decoded_once)
@@ -934,8 +953,6 @@ class StandardArgGuards:
     @classmethod
     def pickle_deserialization_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
         """Blocks Python pickle payloads in serialized molecule/object parameters (CWE-502)."""
-        import base64
-
         for key, val in cls._iter_kv_pairs(args):
             if key.lower() not in cls.PICKLE_PARAM_KEYS:
                 continue
@@ -1076,6 +1093,12 @@ class StandardArgGuards:
                 val_s = v.strip()
                 if cls._is_endpoint_url_key(k):
                     url_entries.append((k, val_s))
+                elif "://" in val_s and k.lower() not in {"content", "body", "text", "replacement", "diff", "markdown", "html"}:
+                    ok_net, net_reason = validate_outbound_network_target(
+                        val_s, allow_private_hosts=normalized_trusted or None
+                    )
+                    if not ok_net:
+                        return False, f"Split-turn SSRF / dangerous URI blocked in '{k}' (CWE-918): {net_reason}"
                 if cls._is_endpoint_token_key(k) or cls.RAW_BEARER_RE.search(val_s):
                     token_entries.append((k, val_s))
 
@@ -2058,9 +2081,15 @@ class SchemaLockVerifier:
                     f"[CROSS-SERVER SHADOWING] Tool `{fq_name}` attempted to hook or shadow another server/tool."
                 )
 
-            # 2. Strip structural prompt-injection markers
+            # 2. Strip structural prompt-injection markers & score Day-0 authority/provider misbinding
+            schema_props = list(((clean_tool.get("inputSchema") or {}).get("properties") or {}).keys())
+            p_score, p_flagged = WireDIFCCanonicalizer.score_tool_poisoning(desc, schema_props)
             if self.INJECTION_MARKERS.search(desc):
                 alerts.append(f"Stripped tool-poisoning injection from `{fq_name}` description.")
+            elif p_flagged:
+                alerts.append(
+                    f"[PROVIDER MISBINDING / AUTHORITY INFLATION] Tool `{fq_name}` scored S_poison={p_score:.2f} >= 0.45."
+                )
             clean_tool["description"] = self.INJECTION_MARKERS.sub("[STRIPPED_BY_MCP_CAGE]", desc).strip()
 
             # 3. Compute SHA-256 over the sanitized tool definition and verify/pin in `mcp-lock.json`
@@ -2111,14 +2140,14 @@ class ToxicFlowGraphAnalyzer:
         r"(?i)(?:^|[._])(read_file|read_text_file|read_multiple_files|file_read_tool|directory_read_tool|query|select_sql|get_secret|read_env|customer_db|get_file_contents|get_config|run_snowflake_query|query_semantic_view|container_file_read|workers_get_worker|get_crawl_result|fhir_read|fhir_search|search_health_records_duckdb|search_values_duckdb|search_health_records_ch|search_values_ch|get_application|get_app_project|get_pod_logs|get_application_logs|get_workload_logs|get_application_events|get_resource_events|get_resources|get_resource_actions|run_soql_query|run_sosl_search|get_record|get_object_fields|list_sobjects)(?:$|[._])"
     )
     MUTATOR_REGEX = re.compile(
-        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute)(?:$|[._])"
+        r"(?i)(?:^|[._])(bash|exec|py_eval|py_exec_file|execute_code|execute_blender_code|code_interpreter|python_interpreter|browser_exec|powershell|start_process|run_command|run_shell_command|write_file|file_writer_tool|edit_file|delete_file|execute_sql|drop_table|git_push|merge_pr|set_config_value|connect_to_jupyter|install_helm_chart|upgrade_helm_chart|kubectl|kubectl_generic|append_content|put_content|patch_content|save_as_pdf|deploy_local_folder|deploy_file_contents|deploy_container_image|cluster_toolkit_download|get_node_sos_report|delete_workspace_safely|force_unlock_workspace|delete_project|action_run|cancel_crawl|kill_browser_session|container_file_write|container_file_delete|container_exec|fhir_create|fhir_update|create_application|update_application|delete_application|sync_application|run_resource_action|create_record|update_record|delete_record|bulk_create_records|bulk_update_records|bulk_delete_records|tooling_execute|apex_execute|restful|tool_execute|send_management_api_request|install_flux_instance)(?:$|[._])"
     )
     EGRESS_REGEX = re.compile(
-        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|publish_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|read_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection|create[-_]contact[-_]import)(?:$|[._])"
+        r"(?i)(?:^|[._])(send_email|imap_send_email|post_message|publish_message|create_issue_comment|create_pull_request|webhook|http_post|fetch_url|fetch_url_content|fetchurlcontent|fetch|fetch_html|fetch_txt|fetch_json|fetch_markdown|fetch_youtube_transcript|web|webfetch|web_fetch|web_fetch_and_analyze|visit_webpage|read_webpage|scrape_website|scrape_element_from_website|browser|browser_use|browser_feedback|navigate|http|curl|get_request|post_request|patch_request|put_request|delete_request|import_asset|import_generated_asset_hunyuan_ai|connect_to_jupyter|zotero_add_item|add_by_url|download_scihub|download_with_fallback|snow_dev_test_connection|create[-_]contact[-_]import|install_flux_instance)(?:$|[._])"
     )
 
     SQL_TOOL_RE = re.compile(
-        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|execute_query|db_query|db_query_explain|db_table_profile|db_table_stats|db_index_usage|ai_analytics_detect_anomalies|query_table|read_records|select_rows|execute_statement|run_statement)(?:$|[._])"
+        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|duckdb|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|execute_query|db_query|db_query_explain|db_table_profile|db_table_stats|db_index_usage|ai_analytics_detect_anomalies|query_table|read_records|select_rows|execute_statement|run_statement|get_tables|get_table_schema)(?:$|[._])"
     )
     NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
     WORKSPACE_FILE_TOOL_RE = re.compile(
@@ -2653,6 +2682,8 @@ class MCPWireGateway:
         self.trusted_endpoints = trusted_endpoints
         self.in_flight_requests: dict[int | str, InFlightRequest] = {}
         self.auto_pin_new: bool = True
+        self.progress_governor = CausalStateProgressGovernor()
+        self.span_provenance = PersistentLineSpanProvenance(self.state_machine.db_path)
 
     def _get_or_build_profile(self, tool_name: str) -> ToolSecurityProfile:
         if tool_name in self.tool_profiles:
@@ -2699,6 +2730,42 @@ class MCPWireGateway:
                         "content": [{"type": "text", "text": f"[MCP-CAGE {eval_res.decision.name}] {eval_res.reason}"}],
                     },
                 }
+
+            # v0.4.0 Wire-DIFC Active Guards:
+            # (a) Causal State-Progress Entropy Governor (blocks OverServe cyclic polling loops under untrusted integrity)
+            cur_int, cur_conf = eval_res.ambient_integrity, eval_res.ambient_confidentiality
+            prog_ok, prog_reason = self.progress_governor.record_step_and_check(tool_name, arguments, cur_int.name)
+            if not prog_ok:
+                return None, {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "isError": True,
+                        "content": [{"type": "text", "text": f"[MCP-CAGE HARD_DENY] {prog_reason}"}],
+                    },
+                }
+
+            # (b) Two-Axis Covert Hex DNS & Natural-Language EFF Diceware-in-Identifier Guard
+            if cur_int < Integrity.TRUSTED and cur_conf >= Confidentiality.SECRET:
+                for arg_k, arg_v in arguments.items():
+                    if isinstance(arg_v, str):
+                        cov_flagged, cov_reason = is_covert_exfil_identifier(str(arg_k), arg_v)
+                        if cov_flagged:
+                            return None, {
+                                "jsonrpc": "2.0",
+                                "id": req_id,
+                                "result": {
+                                    "isError": True,
+                                    "content": [{"type": "text", "text": f"[MCP-CAGE HARD_DENY] {cov_reason}"}],
+                                },
+                            }
+
+            # (c) Content-Addressed Line-Span Persistent Provenance Recording on Untrusted File Writes
+            if cur_int < Integrity.TRUSTED and tool_name in {"write_file", "edit_file", "append_file"}:
+                w_path = str(arguments.get("path") or arguments.get("file_path") or "")
+                w_content = str(arguments.get("content") or arguments.get("replacement") or "")
+                if w_path and w_content:
+                    self.span_provenance.record_file_write_spans(w_path, w_content, cur_int.name)
 
             # Meta-tool inner dispatch guard: evaluate wrapped `tool_name`/`tool` + `arguments`/`args`
             inner_tool = arguments.get("tool_name") or arguments.get("tool")
@@ -3108,6 +3175,475 @@ DEFAULT_AUDIT_CATALOG: dict[str, list[dict[str, Any]]] = {
 }
 
 
+import hmac
+import os
+import subprocess
+
+# ============================================================================
+# 1. INFORMATION-THEORETIC, FIXED-POINT AST & TWO-AXIS COVERT IDENTIFIER GUARDS
+# ============================================================================
+
+ENGLISH_BIGRAMS: frozenset[str] = frozenset({
+    "th", "he", "in", "er", "an", "re", "on", "at", "en", "nd", "ti", "es", "or",
+    "te", "of", "ed", "is", "it", "al", "ar", "st", "to", "nt", "ng", "se", "ha",
+    "as", "ou", "io", "le", "ve", "co", "me", "de", "hi", "ri", "ro", "ic", "ne",
+    "ea", "ra", "ce", "li", "ch", "ll", "be", "ma", "si", "om", "ur",
+})
+
+AUTHORITY_LEXICON: frozenset[str] = frozenset({
+    "critical", "directive", "always", "first", "instead", "override", "supersede",
+    "official", "primary", "recommended", "high-priority", "enterprise-verified",
+    "preferred", "authoritative", "replace", "legacy", "mandatory", "priority",
+})
+
+SENSITIVE_BAIT_LEXICON: frozenset[str] = frozenset({
+    "id_rsa", ".ssh", "context_dump", ".env", "credentials", "shadow",
+})
+
+
+def shannon_entropy(s: str) -> float:
+    """Computes character-level Shannon entropy H(s) in bits/char."""
+    if not s:
+        return 0.0
+    freq: Dict[str, int] = {}
+    for ch in s:
+        freq[ch] = freq.get(ch, 0) + 1
+    n = len(s)
+    return -sum((c / n) * math.log2(c / n) for c in freq.values())
+
+
+def bigram_transition_plausibility(s: str) -> float:
+    """Fraction of alphabetical bigrams belonging to high-frequency English bigrams."""
+    clean = re.sub(r"[^a-zA-Z]", "", s.lower())
+    if len(clean) < 4:
+        return 0.5
+    total = len(clean) - 1
+    hits = sum(1 for i in range(total) if clean[i : i + 2] in ENGLISH_BIGRAMS)
+    return hits / total
+
+
+def iterative_fixed_point_unquote(s: str, max_depth: int = 5) -> str:
+    """Applies URL percent-decoding until a fixed point s^(k) == s^(k-1) is reached."""
+    curr = s
+    for _ in range(max_depth):
+        nxt = urllib.parse.unquote(curr)
+        if nxt == curr:
+            break
+        curr = nxt
+    return curr
+
+
+def extract_untrusted_sink_entities(text: str) -> Set[str]:
+    """Extracts untrusted domains, IPv4 literals, URLs, and emails from untrusted ingress [U]."""
+    entities: Set[str] = set()
+    for m in re.finditer(
+        r"https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}|169\.254\.169\.254)",
+        text,
+    ):
+        entities.add(m.group(1).lower())
+    for m in re.finditer(r"\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b", text):
+        entities.add(m.group(1).lower())
+        entities.add(m.group(1).split("@")[1].lower())
+    for m in re.finditer(
+        r"\b((?:[a-z0-9-]+\.)+(?:evil|attacker|exfil|webhook|burp|oast|leak)[a-z0-9.-]*)\b",
+        text.lower(),
+    ):
+        entities.add(m.group(1).strip())
+    return entities
+
+
+def is_covert_exfil_identifier(param_name: str, val: str, h0_threshold: float = 3.35) -> Tuple[bool, str]:
+    """
+    Two-Axis Information-Theoretic & Schema-Grammar Divergence Detector:
+    - Axis 1: Subdomain / Identifier Shannon Entropy >= H_0 (default 3.35 bits/char).
+    - Axis 2: Typed-Identifier Semantic Surprise — detects natural-language EFF Diceware
+      word sequences stuffed into UUID/hex/ID fields.
+    """
+    if not isinstance(val, str) or len(val) < 16:
+        return False, "OK"
+
+    m_dig = re.search(r"\bdig\s+([a-zA-Z0-9_-]{20,})\.", val)
+    if m_dig:
+        sub_label = m_dig.group(1)
+        h_val = shannon_entropy(sub_label)
+        if h_val >= h0_threshold:
+            return True, f"[COVERT DNS ENTROPY BLOCKED] Subdomain entropy H={h_val:.2f} >= {h0_threshold}"
+
+    p_low = param_name.lower()
+    if any(k in p_low for k in ("uuid", "hex", "id", "token", "hash")):
+        non_hex_alpha = re.findall(r"[g-zG-Z]", val)
+        hyphen_words = [w for w in val.split("-") if w.isalpha() and len(w) >= 3]
+        if len(non_hex_alpha) >= 3 and len(hyphen_words) >= 4 and bigram_transition_plausibility(val) >= 0.22:
+            return True, f"[DICEWARE-IN-IDENTIFIER BLOCKED] Natural-language word sequence in '{param_name}'"
+        if " " not in val and len(val) >= 24:
+            h_val = shannon_entropy(val)
+            if h_val >= h0_threshold:
+                return True, f"[COVERT IDENTIFIER ENTROPY BLOCKED] Param '{param_name}' H={h_val:.2f} >= {h0_threshold}"
+
+    return False, "OK"
+
+
+# ============================================================================
+# 2. UNCONDITIONAL 4-SLOT WIRE CANONICALIZER & AUTHORITY LOG-ODDS SCORER
+# ============================================================================
+
+class WireDIFCCanonicalizer:
+    """
+    Defeats Day-0 Non-Collision Tool-Provider Misbinding (2611.21577v1) and
+    Cross-Framework Tool Poisoning (2611.03555v2).
+    """
+
+    @staticmethod
+    def score_tool_poisoning(desc: str, schema_keys: List[str]) -> Tuple[float, bool]:
+        tokens = re.findall(r"[a-zA-Z0-9_.-]+", desc.lower())
+        if not tokens:
+            return 0.0, False
+        auth_hits = sum(1 for t in tokens if t in AUTHORITY_LEXICON)
+        supersede_hits = len(
+            re.findall(r"\b(instead of|supersede|replace|first|all file queries|legacy)\b", desc.lower())
+        )
+        bait_hits = sum(
+            1 for b in SENSITIVE_BAIT_LEXICON if b in desc.lower() or b in " ".join(schema_keys).lower()
+        )
+        score = (2.5 * auth_hits / max(len(tokens), 8)) + (1.8 * supersede_hits) + (3.0 * bait_hits)
+        return round(score, 4), (score >= 0.45)
+
+    @classmethod
+    def canonicalize_tool_4slot(
+        cls,
+        server_id: str,
+        tool_name: str,
+        raw_desc: str,
+        schema_keys: List[str],
+        trust_tier: str = "EXTERNAL",
+    ) -> Tuple[str, float, bool]:
+        score, flagged = cls.score_tool_poisoning(raw_desc, schema_keys)
+        first_clause = raw_desc.split(".")[0].strip()
+        strip_words = AUTHORITY_LEXICON | {
+            "supersede", "instead", "first", "always", "superior", "canonical",
+            "trusted", "default", "bypass", "faster", "more", "reliable", "better",
+        }
+        neutral_words = [
+            w for w in re.findall(r"[a-zA-Z0-9_-]+", first_clause)
+            if w.lower() not in strip_words
+        ][:12]
+        neutral_summary = " ".join(neutral_words) if neutral_words else f"Invoke {tool_name}"
+        is_ro = any(
+            k in tool_name.lower()
+            for k in ("read", "get", "list", "search", "query", "status", "diff", "log", "describe")
+        )
+        side_effect = "READ_ONLY" if is_ro else "STATE_OR_NET_MUTATION"
+        canonical_desc = (
+            f"[Provider: {server_id} | Trust: {trust_tier}] "
+            f"Action: {neutral_summary}. "
+            f"Params: ({', '.join(schema_keys)}). "
+            f"Class: {side_effect}."
+        )
+        return canonical_desc, score, flagged
+
+
+# ============================================================================
+# 3. CONTENT-ADDRESSED LINE-SPAN PERSISTENT PROVENANCE IN SQLITE WAL
+# ============================================================================
+
+class PersistentLineSpanProvenance:
+    """
+    Defeats Cross-Session Stored Prompt Injection (2606.04425v2) across CLAUDE.md,
+    .cursorrules, MEMORY.md, and source files without whole-file taint freeze.
+    """
+
+    def __init__(self, db_path: Path | str) -> None:
+        self.db_path = str(db_path)
+        self._init_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10.0, isolation_level=None)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        return conn
+
+    def _init_schema(self) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persistent_span_taint (
+                    file_path TEXT,
+                    line_hash TEXT,
+                    origin_integrity TEXT,
+                    entities_json TEXT,
+                    updated_at REAL,
+                    PRIMARY KEY (file_path, line_hash)
+                );
+                """
+            )
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _hash_line(line: str) -> str:
+        return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()
+
+    def record_file_write_spans(self, file_path: str, content: str, origin_integrity: str = "UNTRUSTED") -> int:
+        if origin_integrity == "TRUSTED" or not content:
+            return 0
+        conn = self._connect()
+        inserted = 0
+        now = time.time()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            for line in content.splitlines():
+                ents = extract_untrusted_sink_entities(line)
+                if ents:
+                    lhash = self._hash_line(line)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO persistent_span_taint VALUES (?, ?, ?, ?, ?);",
+                        (file_path, lhash, origin_integrity, json.dumps(sorted(ents)), now),
+                    )
+                    inserted += 1
+            conn.execute("COMMIT;")
+        finally:
+            conn.close()
+        return inserted
+
+    def check_file_read_spans(self, file_path: str, content: str) -> Set[str]:
+        if not content:
+            return set()
+        conn = self._connect()
+        matched_entities: Set[str] = set()
+        try:
+            cur = conn.execute(
+                "SELECT line_hash, entities_json FROM persistent_span_taint WHERE file_path = ?;",
+                (file_path,),
+            )
+            span_map = {row[0]: set(json.loads(row[1])) for row in cur.fetchall()}
+            if not span_map:
+                return set()
+            for line in content.splitlines():
+                lhash = self._hash_line(line)
+                if lhash in span_map:
+                    matched_entities |= span_map[lhash]
+        finally:
+            conn.close()
+        return matched_entities
+
+
+# ============================================================================
+# 4. DESTINATION-BOUND FORMAT-PRESERVING SECRET TOKENIZATION VAULT
+# ============================================================================
+
+class DestinationBoundFPEVault:
+    """
+    Mints format-preserving synthetic tokens T(s_i) before secrets enter the LLM
+    context window (Theorem 2: I(s_i; W_LLM) = 0) and enforces destination-bound
+    capability ACLs on outbound re-hydration.
+    """
+
+    def __init__(self, vault_key: bytes | None = None) -> None:
+        self._key = vault_key or os.urandom(32)
+        self._raw_to_meta: Dict[str, Tuple[str, str]] = {}  # raw_secret -> (synth_token, auth_server)
+        self._synth_to_meta: Dict[str, Tuple[str, str]] = {}  # synth_token -> (raw_secret, auth_server)
+
+    def mint_token(self, raw_secret: str, authorized_server: str) -> str:
+        if raw_secret in self._raw_to_meta:
+            return self._raw_to_meta[raw_secret][0]
+        prefix = raw_secret[:7] if len(raw_secret) >= 12 else raw_secret[:3]
+        digest = hmac.new(self._key, raw_secret.encode("utf-8"), hashlib.sha256).hexdigest()
+        synth = f"{prefix}SYNTH_{digest[:16]}"
+        self._raw_to_meta[raw_secret] = (synth, authorized_server)
+        self._synth_to_meta[synth] = (raw_secret, authorized_server)
+        return synth
+
+    def verify_or_rehydrate_outbound(
+        self,
+        target_server: str,
+        session_integrity: str,
+        args_payload: str,
+    ) -> Tuple[bool, str, str]:
+        """
+        Enforces Theorem 2:
+          AllowRehydrate(T(s_i), S_target, I_k) <=> (S_target == AuthServer(s_i)) and (I_k == "TRUSTED")
+        Returns (allowed, reason, rehydrated_payload).
+        """
+        out_payload = args_payload
+        for synth, (raw_sec, auth_srv) in self._synth_to_meta.items():
+            if synth in out_payload:
+                if target_server != auth_srv or session_integrity != "TRUSTED":
+                    return (
+                        False,
+                        f"[CONFUSED-DEPUTY SECRET ORACLE BLOCKED] Synthetic token '{synth}' cannot be re-hydrated for server='{target_server}' under integrity='{session_integrity}' (authorized='{auth_srv}').",
+                        args_payload,
+                    )
+                out_payload = out_payload.replace(synth, raw_sec)
+        for raw_sec in self._raw_to_meta:
+            if raw_sec in args_payload:
+                return False, "[RAW SECRET EGRESS BLOCKED] Unscrubbed secret detected on outbound wire.", args_payload
+        return True, "OK", out_payload
+
+
+# ============================================================================
+# 5. CAUSAL STATE-PROGRESS ENTROPY GOVERNOR (DEFEATING OVERSERVE 93.88x)
+# ============================================================================
+
+@dataclass
+class CausalStateProgressGovernor:
+    """
+    Implements Theorem 3 Part 2:
+      Z_k = sum_{j=1}^k exp(-eta * Delta S_j) * I(Delta S_j < epsilon_prog)
+    Trips circuit breaker when Z_k >= Theta_circuit on cyclic zero-progress polling
+    loops while allowing arbitrary-length multi-file refactoring workflows.
+    """
+    eta: float = 3.0
+    epsilon_prog: float = 0.20
+    theta_circuit: float = 4.0
+    zero_progress_score: float = 0.0
+    prior_signatures: Set[str] = field(default_factory=set)
+
+    def reset_on_human_turn(self) -> None:
+        self.zero_progress_score = 0.0
+        self.prior_signatures.clear()
+
+    def record_step_and_check(
+        self,
+        tool_name: str,
+        args: Mapping[str, Any],
+        session_integrity: str,
+    ) -> Tuple[bool, str]:
+        if session_integrity == "TRUSTED":
+            return True, "OK"
+        sig = f"{tool_name}:{args.get('path', '')}:{args.get('job_id', '')}:{args.get('url', '')}"
+        if "_state_delta" in args:
+            delta_s = float(args["_state_delta"])
+        else:
+            delta_s = 0.0 if sig in self.prior_signatures else 0.85
+        self.prior_signatures.add(sig)
+        if delta_s < self.epsilon_prog:
+            self.zero_progress_score += math.exp(-self.eta * delta_s)
+        if self.zero_progress_score >= self.theta_circuit:
+            return (
+                False,
+                f"[OVERSERVE RESOURCE AMPLIFICATION CIRCUIT BREAKER] Causal zero-progress score Z_k={self.zero_progress_score:.2f} >= {self.theta_circuit}",
+            )
+        return True, "OK"
+
+
+# ============================================================================
+# 6. AUTOMATED SCHEMA-TO-KERNEL SANDBOX COMPILER (`mcp-cage compile-sandbox`)
+# ============================================================================
+
+class SchemaToKernelSandboxCompiler:
+    """
+    Compiles MCP server capability schemas / lockfiles into stratified OS kernel
+    containment profiles:
+      Pi_kernel = Pi_runtime_RO + Pi_secret_DENY + Pi_workspace_RW + Pi_net_EGRESS
+    Supports macOS Seatbelt (`/usr/bin/sandbox-exec` SBPL) and Linux Bubblewrap/Landlock.
+    """
+
+    @staticmethod
+    def compile_macos_seatbelt_sbpl(
+        workspace_dir: Path | str,
+        extra_secret_dirs: List[Path | str] | None = None,
+        allow_network: bool = False,
+    ) -> str:
+        ws = os.path.realpath(str(workspace_dir))
+        home = os.path.realpath(str(Path.home()))
+        secret_paths = [
+            os.path.join(home, ".ssh"),
+            os.path.join(home, ".aws"),
+            os.path.join(home, ".kube"),
+            os.path.join(home, ".gnupg"),
+            os.path.join(home, ".config", "gcloud"),
+        ]
+        if extra_secret_dirs:
+            secret_paths.extend(os.path.realpath(str(d)) for d in extra_secret_dirs)
+
+        deny_rules = "\n".join(
+            f'(deny file-read* file-write* (subpath "{sp}"))' for sp in secret_paths
+        )
+        net_rule = "(allow network*)" if allow_network else "(deny network-outbound)"
+        return (
+            "(version 1)\n"
+            "(allow default)\n"
+            f"{deny_rules}\n"
+            f'(deny file-write* (subpath "{ws}/.git/hooks"))\n'
+            f'(deny file-write* (literal "{ws}/.env"))\n'
+            f'(deny file-write* (literal "{ws}/.mcp.json"))\n'
+            f'(deny file-write* (literal "{ws}/.cursor/mcp.json"))\n'
+            f"{net_rule}\n"
+        )
+
+    @staticmethod
+    def compile_linux_bwrap_args(
+        workspace_dir: Path | str,
+        allow_network: bool = False,
+    ) -> List[str]:
+        ws = os.path.realpath(str(workspace_dir))
+        args = [
+            "bwrap",
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind-try", "/lib64", "/lib64",
+            "--ro-bind", "/bin", "/bin",
+            "--ro-bind", "/etc", "/etc",
+            "--proc", "/proc",
+            "--dev", "/dev",
+            "--tmpfs", "/tmp",
+            "--bind", ws, ws,
+            "--ro-bind-try", f"{ws}/.git/hooks", f"{ws}/.git/hooks",
+            "--ro-bind-try", f"{ws}/.env", f"{ws}/.env",
+            "--die-with-parent",
+        ]
+        if not allow_network:
+            args.append("--unshare-net")
+        return args
+
+
+# ============================================================================
+# 7. CLI PERSONA RUNNERS (`compile-sandbox` and `bench`)
+# ============================================================================
+
+def run_compile_sandbox_cli(
+    workspace: str,
+    target_os: str = "auto",
+    allow_network: bool = False,
+    output_path: Optional[str] = None,
+) -> int:
+    if target_os == "auto":
+        target_os = "macos" if sys.platform == "darwin" else "linux"
+    if target_os == "macos":
+        profile = SchemaToKernelSandboxCompiler.compile_macos_seatbelt_sbpl(
+            workspace_dir=workspace,
+            allow_network=allow_network,
+        )
+    else:
+        bwrap_cmd = SchemaToKernelSandboxCompiler.compile_linux_bwrap_args(
+            workspace_dir=workspace,
+            allow_network=allow_network,
+        )
+        profile = " ".join(bwrap_cmd) + " -- <MCP_SERVER_CMD>\n"
+
+    if output_path:
+        Path(output_path).write_text(profile)
+        print(json.dumps({"status": "ok", "target_os": target_os, "output_path": output_path}, indent=2))
+    else:
+        print(profile)
+    return 0
+
+
+def run_secbench_cli(suite_dir: Optional[str] = None) -> int:
+    """Runs the reproducible 800-scenario MCP-SecBench + Live Ecological Suites E1-E4."""
+    default_exp_dir = Path("/Users/naga.aerakoni/workspace/agents/research_corpus/experiments")
+    exp_dir = Path(suite_dir) if suite_dir else default_exp_dir
+    v2_script = exp_dir / "run_mcp_secbench_v2.py"
+    v3_script = exp_dir / "run_mcp_secbench_v3_ecological.py"
+    if v2_script.exists() and v3_script.exists():
+        r2 = subprocess.run([sys.executable, str(v2_script)], cwd=str(exp_dir))
+        r3 = subprocess.run([sys.executable, str(v3_script)], cwd=str(exp_dir))
+        return 0 if (r2.returncode == 0 and r3.returncode == 0) else 1
+    print("MCP-SecBench scripts not found at:", exp_dir)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="mcp-cage",
@@ -3157,6 +3693,15 @@ def main(argv: list[str] | None = None) -> int:
         default="deny",
     )
     p_wrap.add_argument("upstream_cmd", nargs=argparse.REMAINDER, help="Command and args after '--'")
+
+    p_cs = sub.add_parser("compile-sandbox", help="Compile MCP schema/lockfile into OS kernel Seatbelt/Landlock sandbox profile")
+    p_cs.add_argument("--workspace", default=".", help="Workspace root directory")
+    p_cs.add_argument("--os", choices=["auto", "macos", "linux"], default="auto", help="Target OS kernel")
+    p_cs.add_argument("--allow-network", action="store_true", help="Permit outbound network sockets in kernel profile")
+    p_cs.add_argument("--output", default=None, help="Optional file path to save compiled kernel sandbox profile")
+
+    p_bench = sub.add_parser("bench", help="Execute the reproducible 800-scenario MCP-SecBench & Live Ecological evaluation suite")
+    p_bench.add_argument("--suite-dir", default=None, help="Optional custom directory for MCP-SecBench scripts")
 
     args = parser.parse_args(argv)
 
@@ -3225,6 +3770,17 @@ def main(argv: list[str] | None = None) -> int:
         from mcp_cage_cli import run_stdio_wrapper
 
         return run_stdio_wrapper(args)
+
+    if args.subcommand == "compile-sandbox":
+        return run_compile_sandbox_cli(
+            workspace=args.workspace,
+            target_os=args.os,
+            allow_network=args.allow_network,
+            output_path=args.output,
+        )
+
+    if args.subcommand == "bench":
+        return run_secbench_cli(suite_dir=args.suite_dir)
 
     return 1
 

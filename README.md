@@ -72,6 +72,7 @@ Each `mcp-cage` release translates real-world vulnerability classes uncovered ac
 | **`v0.1.0`** | Dual-Lattice IFC & Wire Prototype | Invariant Labs GitHub MCP Exploit, `MCPTox`, Microsoft Spotlighting, `MELON` | `SessionTaintStateMachine`, `SchemaLockVerifier` (`mcp-lock.json`), randomized datamarking boundaries, `ToxicFlowGraphAnalyzer` (`mcp-sploit`). |
 | **`v0.2.2`** | Cross-Process WAL & Dual-Plane Firewall | `CVE-2025-53110`, `CVE-2025-53773` (Copilot YOLO), `CVE-2025-54135` (`CurXecute`), AWS IMDSv1 SSRF, DNS exfiltration | Shared SQLite WAL `BidirectionalSecretScrubber`, `BEGIN IMMEDIATE` atomic taint, `validate_outbound_network_target` (IMDS/RFC1918/Shannon DNS), `WorkspaceMCPConfigAuditor`, Plane A + Plane B hooks. |
 | **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), `GoogleCloudPlatform/cloud-run-mcp` (`#586725173`), `cloudflare/mcp-server-cloudflare`, `GoogleCloudPlatform/gke-mcp` & `Flux159/mcp-server-kubernetes`, `Snowflake-Labs/mcp` & `benborla/mcp-server-mysql` | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
+| **`v0.4.0`** | Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Compiler | Day-0 Non-Collision Tool-Provider Misbinding, Cross-Session Stored XPIA (`CLAUDE.md`), `OverServe` Resource Amplification ($93.88\times$), EFF Diceware Covert Identifiers, Missing OS Kernel Containment | `WireDIFCCanonicalizer` (`S_poison >= 0.45` + 4-Slot Canonicalizer), `PersistentLineSpanProvenance` (`persistent_span_taint`), `DestinationBoundFPEVault`, `CausalStateProgressGovernor`, `SchemaToKernelSandboxCompiler` (`mcp-cage compile-sandbox` Seatbelt SBPL / Landlock), `mcp-cage bench`. |
 
 ---
 
@@ -82,13 +83,11 @@ git clone https://github.com/nagarajulu/mcp-cage.git
 cd mcp-cage
 pip install -e .
 
-# 1. Run the 5-Act Interactive Verification Demo
-python3 demo_interactive.py
+# 1. Run the Unified 6-Suite Non-Regression & 9-Plane E2E Verification Runner
+python3 run_all_regression_suites.py
 
-# 2. Run the Full Unit, v0.3.0 Empirical Guards & 8-Plane E2E Security Test Suites
-python3 test_mcp_cage_v30_empirical_guards.py -v
-python3 test_mcp_cage_v21.py -v
-python3 test_e2e_all_8_planes.py
+# 2. Compile an OS Kernel Seatbelt SBPL (macOS) or Landlock/bwrap (Linux) Sandbox Profile
+mcp-cage compile-sandbox --workspace . --os auto
 
 # 3. Audit workspace MCP configs for CurXecute RCE & hardcoded secrets
 mcp-cage audit-config

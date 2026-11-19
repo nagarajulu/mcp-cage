@@ -336,5 +336,7 @@ class TestMCPCageV30EmpiricalGuards(unittest.TestCase):
         self.assertLess(mean_ms, 1.0, f"Expected sub-millisecond mean latency, got {mean_ms:.3f} ms")
 
 
+from test_mcp_cage_v40_wiredifc_and_secbench import TestMCPCageV40WireDIFC  # noqa: F401, E402
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

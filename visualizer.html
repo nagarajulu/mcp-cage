@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="mcp-cage v0.3.0 — Zero-Code Wire & Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI, Antigravity & MCP by Nagarajulu (Naga) Aerakoni." />
-  <title>mcp-cage v0.3.0 — Zero-Code Wire &amp; Native-Hook Security Firewall for AI Coding Agents &amp; MCP</title>
+  <meta name="description" content="mcp-cage v0.4.0 — Zero-Code Wire & Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI, Antigravity & MCP by Nagarajulu (Naga) Aerakoni." />
+  <title>mcp-cage v0.4.0 — Zero-Code Wire &amp; Native-Hook Security Firewall for AI Coding Agents &amp; MCP</title>
   <style>
     :root {
       --bg: #070b14;
@@ -873,7 +873,7 @@
       .table-wrapper table {
         --label-2: "Sector";
         --label-3: "Vulnerability Class";
-        --label-4: "mcp-cage v0.3.0 Guard";
+        --label-4: "mcp-cage v0.4.0 Guard";
         --label-5: "Regression Suite";
       }
       .table-wrapper td:nth-child(2)::before { content: var(--label-2) ": "; font-weight: 700; color: var(--accent); }
@@ -928,7 +928,7 @@
     <div class="sticky-nav-inner">
       <div class="brand">
         <span>🛡️ <code>mcp-cage</code></span>
-        <span class="brand-version">v0.3.0</span>
+        <span class="brand-version">v0.4.0</span>
       </div>
       <div class="nav-links">
         <a href="#integration-modes">5 Modes</a>
@@ -950,7 +950,7 @@
         <span>·</span>
         <span>100% PYTHON 3.10+ STDLIB</span>
       </div>
-      <h1><code>mcp-cage</code> v0.3.0 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
+      <h1><code>mcp-cage</code> v0.4.0 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
       <p class="hero-tagline">
         <strong>"Gitleaks + Little Snitch for AI Coding Agents"</strong> — Deterministic, non-bypassable Information-Flow Control (IFC), format-preserving secret scrubbing, SSRF/DNS exfiltration blocking, and <code>MCPTox</code> / <code>CurXecute</code> defense for <strong>Claude Code</strong>, <strong>Cursor</strong>, <strong>OpenAI Codex CLI</strong>, <strong>Google Gemini CLI</strong>, <strong>Google Antigravity (<code>agy</code>)</strong>, and any <strong>Model Context Protocol (MCP)</strong> server.
       </p>
@@ -1201,7 +1201,7 @@
               <th>Audited Repository / Target</th>
               <th>Sector</th>
               <th>Discovered Vulnerability Class</th>
-              <th>Generalized <code>mcp-cage</code> v0.3.0 Wire Guard</th>
+              <th>Generalized <code>mcp-cage</code> v0.4.0 Wire Guard</th>
               <th>Non-Regression Verification Suite</th>
             </tr>
           </thead>
@@ -1338,7 +1338,7 @@
             </p>
             <pre class="code-box" style="min-height:110px;">python3 run_all_regression_suites.py
 # [PASS] 1. V2.2 Core IFC, WAL Vault, SSRF/DNS &amp; Config Auditor Suite (test_mcp_cage_v21.py)
-# [PASS] 2. v0.3.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)
+# [PASS] 2. v0.4.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)
 # [PASS] 3. 8-Plane End-to-End Security Suite (test_e2e_all_8_planes.py)
 # [PASS] 4. Tier 2 Official Node.js MCP + Live HTTP Canary Suite (test_tier2_real_mcp_and_canary.py)
 # [PASS] 5. Agentic AI Tools (CrewAI/Smolagents/Browser-Use) &amp; Waves 1–7 Non-Regression Suite (test_agentic_ai_tools_and_non_regression.py)
@@ -1401,9 +1401,9 @@
       <div class="section-header">
         <div>
           <div class="section-eyebrow">Interactive Browser Sandbox</div>
-          <h2 class="section-title">Live Exploit &amp; Toxic-Flow Simulator (V1 Failure Replay vs. v0.3.0 Defense)</h2>
+          <h2 class="section-title">Live Exploit &amp; Toxic-Flow Simulator (V1 Failure Replay vs. v0.4.0 Defense)</h2>
           <p class="section-subtitle">
-            Replay the <strong>V1 Handle-Tracker Failure</strong> (where context laundering &amp; cross-process leaks bypass naive guards) side-by-side against <strong><code>mcp-cage</code> v0.3.0</strong>, inspect the live $(P \times U \Rightarrow S)$ capability graph, or run <code>mcp-sploit</code> static audits and explore the 36-Vector Master Attack Atlas.
+            Replay the <strong>V1 Handle-Tracker Failure</strong> (where context laundering &amp; cross-process leaks bypass naive guards) side-by-side against <strong><code>mcp-cage</code> v0.4.0</strong>, inspect the live $(P \times U \Rightarrow S)$ capability graph, or run <code>mcp-sploit</code> static audits and explore the 36-Vector Master Attack Atlas.
           </p>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -1449,7 +1449,7 @@
             <h2>Interactive Replay &amp; Tool Palette</h2>
             <div class="preset-row">
               <button type="button" class="preset-btn v1-fail" onclick="runV1FailureReplay()">⚠️ Replay V1 Failure (Laundered Leak)</button>
-              <button type="button" class="preset-btn v2-block" onclick="runAttackPreset()">🛡️ Replay v0.3.0 Blocked Exploit</button>
+              <button type="button" class="preset-btn v2-block" onclick="runAttackPreset()">🛡️ Replay v0.4.0 Blocked Exploit</button>
             </div>
             <div class="preset-row">
               <button type="button" class="preset-btn" onclick="runBenignPreset()">▶ Benign Dev Flow (0 Popups)</button>
@@ -1728,7 +1728,7 @@
               <th style="width:240px;">System / Milestone Paper</th>
               <th style="width:230px;">Authors / Venue</th>
               <th style="width:170px;">Primary Citation Link</th>
-              <th>Core Principle &amp; Direct Adaptation in <code>mcp-cage</code> v0.3.0</th>
+              <th>Core Principle &amp; Direct Adaptation in <code>mcp-cage</code> v0.4.0</th>
             </tr>
           </thead>
           <tbody>
@@ -1825,7 +1825,7 @@
             </tr>
             <tr>
               <td><strong>2026</strong></td>
-              <td><strong>FLOWSEAL &amp; <code>mcp-cage</code> v0.3.0</strong></td>
+              <td><strong>FLOWSEAL &amp; <code>mcp-cage</code> v0.4.0</strong></td>
               <td>Nagarajulu (Naga) Aerakoni</td>
               <td><a href="https://github.com/nagarajulu/mcp-cage" target="_blank" rel="noopener"><code>arXiv:2609.14003</code> / GitHub ↗</a></td>
               <td>Unifies Plane A (MCP JSON-RPC 2.0 wire proxy) and Plane B (native IDE/CLI lifecycle hooks) over a single cross-process SQLite WAL taint state machine &amp; bidirectional secret vault.</td>
@@ -1837,7 +1837,7 @@
 
     <footer>
       <div>
-        <strong><code>mcp-cage</code> v0.3.0</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
+        <strong><code>mcp-cage</code> v0.4.0</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
       </div>
       <div>
         <a href="https://github.com/nagarajulu/mcp-cage" target="_blank" rel="noopener">GitHub Repository</a> ·
@@ -2355,7 +2355,7 @@ Login fails on Safari 18.
       state.auditLog = [];
       updateViews(
         'allow',
-        'Session initialized cleanly. Click any tool on the left—or click "Replay V1 Failure" vs "Replay v0.3.0 Blocked Exploit"—to test wire & hook enforcement.',
+        'Session initialized cleanly. Click any tool on the left—or click "Replay V1 Failure" vs "Replay v0.4.0 Blocked Exploit"—to test wire & hook enforcement.',
         'Waiting for tool calls...\nSession Context is clean (TRUSTED, PUBLIC).',
         'SQLite WAL State (.mcp-cage/taint.db):\n  integrity = TRUSTED\n  confidentiality = PUBLIC\n  untrusted_entities = []\n  leases = {}\n\nmcp-lock.json verified (SHA-256).',
         'Plane A (MCP stdio proxy) + Plane B (native hooks) listening:\n- filesystem, github, slack, postgres, fetch, Bash'
@@ -2402,7 +2402,7 @@ Login fails on Safari 18.
       appendAudit('slack.post_message [V1_NAIVE]', 'ALLOW (BYPASSED!)', 'EXFILTRATED', 'V1 Handle Tracker only checked for literal $ref_env_1 handle -> Context-laundered secret leaked to Slack!');
       updateViews(
         'deny',
-        '⚠️ V1 FAILURE REPLAY (Why Naive Handle Trackers Fail): In V1, the firewall only blocked calls containing a literal `$ref` handle in memory. When the hijacked LLM summarized `.env` in its own words (Context Laundering) or called a separate MCP server process, V1 allowed the Slack message—leaking credentials! Now click "🛡️ Replay v0.3.0 Blocked Exploit" to see how mcp-cage v0.3.0 stops both!',
+        '⚠️ V1 FAILURE REPLAY (Why Naive Handle Trackers Fail): In V1, the firewall only blocked calls containing a literal `$ref` handle in memory. When the hijacked LLM summarized `.env` in its own words (Context Laundering) or called a separate MCP server process, V1 allowed the Slack message—leaking credentials! Now click "🛡️ Replay v0.4.0 Blocked Exploit" to see how mcp-cage v0.4.0 stops both!',
         '❌ V1 Host Context (Unscrubbed):\nLLM saw raw OPENAI_API_KEY=sk-proj-9988... and rewrote it in prose:\n"Diagnostic summary: key starts with sk-proj-9988 on prod-db.internal"',
         '❌ V1 Naive Check:\nChecked if args contain "$ref_1" -> FALSE.\nProcess 2 (slack) had no shared SQLite vault with Process 1 (filesystem).\nResult: ALLOWED ON WIRE (FATAL LEAK!)',
         '💥 Upstream Slack Server received exfiltrated production secrets!'
@@ -2787,7 +2787,7 @@ Login fails on Safari 18.
       `;
 
       document.getElementById('generatedPolicyBox').textContent =
-`# Auto-generated by mcp-sploit (mcp-cage v0.3.0)
+`# Auto-generated by mcp-sploit (mcp-cage v0.4.0)
 mode: enforce
 session_isolation: workspace_window
 secret_scrubber:
@@ -2873,7 +2873,7 @@ ${S.map(x => `  ${x}:\n    role: EXTERNAL_EGRESS_SINK\n    min_integrity: ENDORS
             </div>
           </td>
           <td style="vertical-align:top; line-height:1.45;">
-            <div style="margin-bottom:5px;"><span class="badge green">✅ Enforced in v0.3.0</span></div>
+            <div style="margin-bottom:5px;"><span class="badge green">✅ Enforced in v0.4.0</span></div>
             <div style="font-size:12px; color:var(--muted);">${v.def}</div>
           </td>
         </tr>
