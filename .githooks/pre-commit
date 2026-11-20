@@ -91,6 +91,15 @@ def main() -> int:
             f"[GATE6_VERSION_DRIFT] pyproject.toml version '{m_py.group(1)}' != mcp_cage_core.__version__ '{m_core.group(1)}'"
         )
 
+    # Gate 7: Showcase HTML parity check (`visualizer.html` == `docs/index.html`)
+    vis_path = REPO_ROOT / "visualizer.html"
+    docs_path = REPO_ROOT / "docs" / "index.html"
+    if vis_path.is_file() and docs_path.is_file():
+        if vis_path.read_bytes() != docs_path.read_bytes():
+            violations.append(
+                "[GATE7_SHOWCASE_HTML_DRIFT] 'visualizer.html' and 'docs/index.html' differ; copy visualizer.html to docs/index.html."
+            )
+
     # Gate 1 (Git History): Scan recent git commit messages
     log_out = subprocess.check_output(
         ["git", "log", "-n", "25", "--oneline"], cwd=REPO_ROOT, text=True

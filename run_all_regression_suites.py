@@ -66,7 +66,11 @@ def build_suites() -> list[tuple[str, list[str]]]:
                 [sys.executable, str(PROTOTYPE_DIR / "test_cwe_empirical_catalog_matrix.py")],
             ),
             (
-                "8. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)",
+                "8. Modular Package & Declarative Enterprise Policy Suite (tests/unit/test_modular_package_and_policy.py)",
+                [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_modular_package_and_policy.py")],
+            ),
+            (
+                "9. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)",
                 [sys.executable, str(PROTOTYPE_DIR / "demo_interactive.py")],
             ),
         ]

@@ -276,23 +276,31 @@ class TestAgenticAiToolsAndNonRegression(unittest.TestCase):
 
     def test_06_zero_external_dependencies_stdlib_purity(self) -> None:
         """
-        Guarantees `mcp_cage_core.py`, `mcp_cage_proxy.py`, and `mcp_cage_cli.py` only import
-        Python 3.10+ standard-library modules (or each other), preventing dependency bloat.
+        Guarantees `mcp_cage_core.py`, `mcp_cage_proxy.py`, `mcp_cage_cli.py`, and all
+        `mcp_cage/*.py` submodules only import Python 3.10+ standard-library modules
+        (or each other), preventing dependency bloat.
         """
-        local_modules = {"mcp_cage_core", "mcp_cage_proxy", "mcp_cage_cli"}
+        local_modules = {"mcp_cage", "mcp_cage_core", "mcp_cage_proxy", "mcp_cage_cli"}
         stdlib_names = set(sys.stdlib_module_names) | local_modules | {"__future__"}
 
-        for filename in ("mcp_cage_core.py", "mcp_cage_proxy.py", "mcp_cage_cli.py"):
-            source = (PROTOTYPE_DIR / filename).read_text(encoding="utf-8")
-            tree = ast.parse(source, filename=filename)
+        target_files = [
+            PROTOTYPE_DIR / "mcp_cage_core.py",
+            PROTOTYPE_DIR / "mcp_cage_proxy.py",
+            PROTOTYPE_DIR / "mcp_cage_cli.py",
+            *sorted((PROTOTYPE_DIR / "mcp_cage").glob("*.py")),
+        ]
+        for filepath in target_files:
+            rel_name = str(filepath.relative_to(PROTOTYPE_DIR))
+            source = filepath.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel_name)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top = alias.name.split(".")[0]
-                        self.assertIn(top, stdlib_names, f"Non-stdlib import '{top}' found in {filename}")
+                        self.assertIn(top, stdlib_names, f"Non-stdlib import '{top}' found in {rel_name}")
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     top = node.module.split(".")[0]
-                    self.assertIn(top, stdlib_names, f"Non-stdlib import '{top}' found in {filename}")
+                    self.assertIn(top, stdlib_names, f"Non-stdlib import '{top}' found in {rel_name}")
 
     def test_07_sub_millisecond_wire_latency_non_regression(self) -> None:
         """

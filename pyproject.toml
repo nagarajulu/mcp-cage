@@ -49,4 +49,5 @@ mcp-cage = "mcp_cage_core:main"
 mcp-sploit = "mcp_cage_core:main"
 
 [tool.setuptools]
+packages = ["mcp_cage"]
 py-modules = ["mcp_cage_core", "mcp_cage_proxy", "mcp_cage_cli"]
