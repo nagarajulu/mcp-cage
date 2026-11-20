@@ -42,5 +42,8 @@ jobs:
       - name: Run Agentic AI Toolkits & Cross-Version Non-Regression Suite (test_agentic_ai_tools_and_non_regression.py)
         run: python3 test_agentic_ai_tools_and_non_regression.py -v
 
+      - name: Run 25-Mechanism Empirical CWE Paired-Twin Matrix (test_cwe_empirical_catalog_matrix.py)
+        run: python3 test_cwe_empirical_catalog_matrix.py -v
+
       - name: Run Interactive 5-Act Verification Demo (demo_interactive.py)
         run: python3 demo_interactive.py

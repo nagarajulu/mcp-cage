@@ -62,7 +62,11 @@ def build_suites() -> list[tuple[str, list[str]]]:
                 [sys.executable, str(PROTOTYPE_DIR / "test_agentic_ai_tools_and_non_regression.py")],
             ),
             (
-                "7. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)",
+                "7. 25-Mechanism Empirical CWE Paired-Twin Matrix (test_cwe_empirical_catalog_matrix.py)",
+                [sys.executable, str(PROTOTYPE_DIR / "test_cwe_empirical_catalog_matrix.py")],
+            ),
+            (
+                "8. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)",
                 [sys.executable, str(PROTOTYPE_DIR / "demo_interactive.py")],
             ),
         ]

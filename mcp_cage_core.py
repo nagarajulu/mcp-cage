@@ -193,6 +193,8 @@ WORKSPACE_PATH_KEYS: tuple[str, ...] = (
     "outputPath",
     "input_path",
     "inputPath",
+    "project_path",
+    "projectPath",
 )
 LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
     {
@@ -206,6 +208,8 @@ LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
         "workingdirectory",
         "download_directory",
         "downloaddirectory",
+        "projectpath",
+        "project_path",
     }
 )
 POSIX_CMD_SUBST_RE = re.compile(r"\$\(|`|\$\{|\x00")
@@ -2189,7 +2193,7 @@ class ToxicFlowGraphAnalyzer:
     )
 
     SQL_TOOL_RE = re.compile(
-        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|[a-z0-9]*db|clickhouse|health_records_ch|by_type_ch|trend_data_ch|values_ch|semantic_view|run_query|run_[a-z0-9_]+_query|execute_query|execute_[a-z0-9_]+_query|db_query|db_query_explain|db_table_profile|db_table_stats|db_index_usage|ai_analytics_detect_anomalies|query_table|read_records|select_rows|execute_statement|run_statement|get_tables|get_table_schema)(?:$|[._])"
+        r"(?i)(?:^|[._]|_)(?:sql|mysql|postgres|postgresql|sqlite|snowflake|bigquery|[a-z0-9]*db|clickhouse|health_records(?:_[a-z0-9]+)?|by_type(?:_[a-z0-9]+)?|trend_data(?:_[a-z0-9]+)?|values_[a-z0-9]+|semantic_view|run_query|run_[a-z0-9_]+_query|execute_query|execute_[a-z0-9_]+_query|db_query|db_query_explain|db_table_profile|db_table_stats|db_index_usage|ai_analytics_detect_anomalies|query_table|read_records|select_rows|execute_statement|run_statement|get_tables|get_table_schema)(?:$|[._])"
     )
     NON_SQL_SEARCH_RE = re.compile(r"(?i)(?:web_search|search_web|search_files|grep_search|code_search)")
     WORKSPACE_FILE_TOOL_RE = re.compile(
@@ -2261,14 +2265,14 @@ class ToxicFlowGraphAnalyzer:
             ),
             StandardArgGuards.path_command_substitution_guard,
             StandardArgGuards.cli_flag_injection_guard,
+            StandardArgGuards.mqtt_topic_wildcard_guard,
+            StandardArgGuards.cypher_identifier_guard,
+            StandardArgGuards.oauth_xss_guard,
             StandardArgGuards.url_path_segment_guard,
             StandardArgGuards.pickle_deserialization_guard,
             StandardArgGuards.package_install_guard,
             StandardArgGuards.code_sandbox_escape_guard,
             StandardArgGuards.make_attachment_path_guard(workspace_root),
-            StandardArgGuards.mqtt_topic_wildcard_guard,
-            StandardArgGuards.cypher_identifier_guard,
-            StandardArgGuards.oauth_xss_guard,
         ]
         if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
             guards.append(StandardArgGuards.rest_relative_path_guard)

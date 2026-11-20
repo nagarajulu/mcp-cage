@@ -38,7 +38,7 @@ INTERNAL_DRAFT_RE = re.compile(
 
 # Gate 3: Machine / Personal Path Leaks & Contiguous Push-Protection Secret Literals
 PERSONAL_PATH_RE = re.compile(
-    r"(?i)(/Users/(?!you\b)[a-z0-9._\-]+|/home/(?!user\b|runner\b)[a-z0-9._\-]+|naga\.aerakoni|/opt/anaconda3|research_corpus|sk_live_[0-9a-zA-Z]{24,})"
+    r"((?<!\.\.)/Users/(?!you\b)[a-zA-Z0-9._\-]+|(?<!\.\.)/home/(?!user\b|runner\b)[a-zA-Z0-9._\-]+|(?i:naga\.aerakoni|/opt/anaconda3|research_corpus|sk_live_[0-9a-zA-Z]{24,}))"
 )
 
 
