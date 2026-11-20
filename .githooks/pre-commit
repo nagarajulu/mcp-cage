@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""
+Automated 6-Gate OPSEC, Embargo & Personal-Path Pre-Commit / CI Scanner for `mcp-cage`
+(`.githooks/pre-commit`).
+
+Blocks commits, pushes, or PyPI builds if any tracked file, untracked working-tree file,
+or version metadata violates the 6 Zero-Leak Gates:
+  Gate 1: Zero Embargoed Vendor / Product / Wave Identifiers
+  Gate 2: Zero Synthetic / Unpublished Preprint IDs or Internal Draft Filenames
+  Gate 3: Zero Personal / Machine Path Leaks (`/Users/...`, `/opt/anaconda3`, etc.)
+  Gate 4: Zero Vendor-Fingerprinting Constants (`BROWSER_USE_API_KEY`, `RDKIT_BINARY_MAGIC`, `.imap-mcp`)
+  Gate 5: Clean Git Working Tree (0 untracked scratch/report/config files)
+  Gate 6: Version Parity (`pyproject.toml` version == `mcp_cage_core.__version__`)
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Gate 1 & 4: Embargoed wave/vendor names & 0-day oracle constants
+EMBARGO_VENDOR_RE = re.compile(
+    r"(?i)\b(Wave\s+\d+|wazuh|blueteam_|erpnext|search_doctype|airflow|xcom_key|"
+    r"argocd|salesforce|run_soql_query|run_sosl_search|apex_execute|tooling_execute|servicenow|"
+    r"duckdb|zotero|crewai|smolagents|BROWSER_USE_API_KEY|imap-mcp|RDKIT_BINARY_MAGIC|"
+    r"RDKitMolBinary|workers_get_worker|autorag_search|run_snowflake_query|gke_get_cluster|"
+    r"execute_blender_code|terraform_org_name)\b"
+)
+
+# Gate 2: Synthetic/unpublished arXiv numbers & internal draft filenames
+INTERNAL_DRAFT_RE = re.compile(
+    r"(?i)\b(2611\.\d{5}|2606\.\d{5}|mcp_cage_wiredifc_v4|critic_feedback_v2|critic_and_usability_audit)\b"
+)
+
+# Gate 3: Machine / Personal Path Leaks & Contiguous Push-Protection Secret Literals
+PERSONAL_PATH_RE = re.compile(
+    r"(?i)(/Users/(?!you\b)[a-z0-9._\-]+|/home/(?!user\b|runner\b)[a-z0-9._\-]+|naga\.aerakoni|/opt/anaconda3|research_corpus|sk_live_[0-9a-zA-Z]{24,})"
+)
+
+
+def scan_text(source_label: str, text: str) -> list[str]:
+    violations: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for label, pattern in (
+            ("GATE3_PERSONAL_PATH_LEAK", PERSONAL_PATH_RE),
+            ("GATE2_INTERNAL_DRAFT_LEAK", INTERNAL_DRAFT_RE),
+            ("GATE1_4_EMBARGO_VENDOR_LEAK", EMBARGO_VENDOR_RE),
+        ):
+            m = pattern.search(line)
+            if m:
+                violations.append(
+                    f"[{label}] {source_label}:{lineno}: matched '{m.group(0)}' -> {line.strip()[:100]}"
+                )
+    return violations
+
+
+def main() -> int:
+    violations: list[str] = []
+
+    # Gate 5: Check for untracked files in working tree
+    status_out = subprocess.check_output(
+        ["git", "status", "--porcelain", "-u"], cwd=REPO_ROOT, text=True
+    )
+    for line in status_out.splitlines():
+        if line.startswith("?? "):
+            untracked = line[3:].strip()
+            violations.append(
+                f"[GATE5_UNTRACKED_FILE_HAZARD] Untracked file in repo working tree: '{untracked}'"
+            )
+
+    # Gate 1, 2, 3, 4: Scan all tracked files (excluding this scanner script itself)
+    tracked = subprocess.check_output(["git", "ls-files"], cwd=REPO_ROOT, text=True).splitlines()
+    for rel_path in tracked:
+        p = REPO_ROOT / rel_path
+        if not p.is_file() or p.resolve() == Path(__file__).resolve():
+            continue
+        content = p.read_text(encoding="utf-8", errors="ignore")
+        violations.extend(scan_text(rel_path, content))
+
+    # Gate 6: Version parity check (`pyproject.toml` vs `mcp_cage_core.__version__`)
+    pyproject_txt = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    core_txt = (REPO_ROOT / "mcp_cage_core.py").read_text(encoding="utf-8")
+    m_py = re.search(r'^version\s*=\s*"([^"]+)"', pyproject_txt, flags=re.MULTILINE)
+    m_core = re.search(r'^__version__\s*=\s*"([^"]+)"', core_txt, flags=re.MULTILINE)
+    if m_py and m_core and m_py.group(1) != m_core.group(1):
+        violations.append(
+            f"[GATE6_VERSION_DRIFT] pyproject.toml version '{m_py.group(1)}' != mcp_cage_core.__version__ '{m_core.group(1)}'"
+        )
+
+    # Gate 1 (Git History): Scan recent git commit messages
+    log_out = subprocess.check_output(
+        ["git", "log", "-n", "25", "--oneline"], cwd=REPO_ROOT, text=True
+    )
+    violations.extend(scan_text("git-log", log_out))
+
+    if violations:
+        sys.stderr.write("\n🚨 [MCP-CAGE 6-GATE OPSEC & EMBARGO CHECK FAILED] 🚨\n")
+        for v in violations:
+            sys.stderr.write(f"  ✗ {v}\n")
+        sys.stderr.write(f"\nTotal violations: {len(violations)}. Commit/Release aborted.\n")
+        return 1
+
+    print("✅ [MCP-CAGE 6-GATE OPSEC CHECK PASSED] 0 personal paths, 0 synthetic preprints, 0 embargoed vendor leaks, 0 untracked files.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

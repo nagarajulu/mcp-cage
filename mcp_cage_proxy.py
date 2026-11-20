@@ -1,8 +1,7 @@
 """
 Real JSON-RPC 2.0 Wire Interceptor (`mcp_cage_proxy.py`).
 
-Addresses Critic Audit Part 2:
-- Implements full JSON-RPC 2.0 packet processing across ALL MCP attack surfaces:
+Implements full JSON-RPC 2.0 packet processing across ALL MCP attack surfaces:
   1. `tools/list` -> `mcp-lock.json` SHA-256 verification + description injection scrubbing.
   2. `tools/call` -> Argument policy gate + Cross-process secret rehydration check +
      Lethal Trifecta circuit breaker + Timeout-safe soft-error fallback + Response secret scrubbing.
@@ -18,22 +17,25 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from mcp_cage_core import (
     BidirectionalSecretScrubber,
+    CausalStateProgressGovernor,
     Confidentiality,
     DeclassificationAction,
     EnforcementMode,
     GateDecisionType,
     GateEvaluation,
     Integrity,
+    PersistentLineSpanProvenance,
     SchemaLockVerifier,
     SessionTaintStateMachine,
     ToolRole,
     ToolSecurityProfile,
     WirePayloadSanitizer,
     filesystem_read_taint_resolver,
+    is_covert_exfil_identifier,
 )
 
 
@@ -62,6 +64,8 @@ class MCPJsonRpcProxy:
         self.auto_pin_on_first_list = auto_pin_on_first_list
         # Tracks in-flight client->server requests by JSON-RPC `id`
         self._pending_requests: dict[int | str, dict[str, Any]] = {}
+        self.progress_governor = CausalStateProgressGovernor()
+        self.span_provenance = PersistentLineSpanProvenance(self.state_machine.db_path)
 
     def _default_profile(self, tool_name: str) -> ToolSecurityProfile:
         return ToolSecurityProfile(
@@ -114,6 +118,25 @@ class MCPJsonRpcProxy:
                 if action in (DeclassificationAction.LEASE_MUTATOR_5M, DeclassificationAction.ENDORSE_CONTEXT):
                     self.state_machine.apply_declassification(action)
 
+            # 3. v0.4.0 Wire-DIFC Active Guards
+            cur_int, cur_conf = eval_res.ambient_integrity, eval_res.ambient_confidentiality
+            prog_ok, prog_reason = self.progress_governor.record_step_and_check(tool_name, arguments, cur_int.name)
+            if not prog_ok:
+                return None, self._soft_block_response(req_id, f"[MCP-CAGE HARD_DENY] {prog_reason}")
+
+            if cur_int < Integrity.TRUSTED and cur_conf >= Confidentiality.SECRET:
+                for arg_k, arg_v in arguments.items():
+                    if isinstance(arg_v, str):
+                        cov_flagged, cov_reason = is_covert_exfil_identifier(str(arg_k), arg_v)
+                        if cov_flagged:
+                            return None, self._soft_block_response(req_id, f"[MCP-CAGE HARD_DENY] {cov_reason}")
+
+            if cur_int < Integrity.TRUSTED and tool_name in {"write_file", "edit_file", "append_file"}:
+                w_path = str(arguments.get("path") or arguments.get("file_path") or "")
+                w_content = str(arguments.get("content") or arguments.get("replacement") or "")
+                if w_path and w_content:
+                    self.span_provenance.record_file_write_spans(w_path, w_content, cur_int.name)
+
             # Forward request with rehydrated arguments (if authorized)
             forwarded = dict(msg)
             forwarded["params"] = {**params, "arguments": rehydrated_args}
@@ -164,6 +187,14 @@ class MCPJsonRpcProxy:
         # 2. Response to a client request
         req_id = msg.get("id")
         req_meta = self._pending_requests.pop(req_id, None) if req_id is not None else None
+
+        if "error" in msg and isinstance(msg["error"], Mapping):
+            err_copy = dict(msg["error"])
+            if "message" in err_copy and isinstance(err_copy["message"], str):
+                scrubbed_err, _ = self.scrubber.scrub_text(err_copy["message"])
+                err_copy["message"] = scrubbed_err
+            return {**msg, "error": err_copy}
+
         if not req_meta or "result" not in msg:
             return msg
 
@@ -196,6 +227,22 @@ class MCPJsonRpcProxy:
                 response_text=sanitized_str,
                 had_redacted_secrets=bool(minted_tokens),
             )
+            r_path = str(arguments.get("path") or arguments.get("file_path") or "")
+            if r_path:
+                recovered_ents = self.span_provenance.check_file_read_spans(r_path, sanitized_str)
+                if recovered_ents:
+                    untrusted_span_profile = ToolSecurityProfile(
+                        server=self.server_name,
+                        tool_name=f"{tool_name}:tainted_span",
+                        roles=frozenset({ToolRole.UNTRUSTED_SOURCE}),
+                        source_integrity=Integrity.UNTRUSTED,
+                    )
+                    self.state_machine.on_tool_response(
+                        profile=untrusted_span_profile,
+                        arguments={"path": r_path},
+                        response_text=" ".join(f"https://{e}" for e in sorted(recovered_ents)),
+                        had_redacted_secrets=False,
+                    )
             return {**msg, "result": scrubbed_result}
 
         # Case C: `resources/read` response -> sanitize Unicode/ANSI, scrub secrets & taint based on URI + content

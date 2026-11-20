@@ -189,9 +189,20 @@ def build_default_profiles(server_name: str, workspace_root: Path) -> dict[str, 
 class DynamicProfileAwareProxy(MCPJsonRpcProxy):
     """
     Extends `MCPJsonRpcProxy` so any previously unseen tool returned in `tools/list`
-    is automatically classified by `ToxicFlowGraphAnalyzer.classify_tool` and given
-    an appropriate `ToolSecurityProfile` if not already explicitly configured.
+    or called dynamically is automatically classified by `ToxicFlowGraphAnalyzer.build_default_profile`
+    with full v0.3.0 empirical wire-level guards.
     """
+
+    def __init__(self, *args: Any, workspace_root: Path | None = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.workspace_root = (workspace_root or Path.cwd()).resolve()
+
+    def _default_profile(self, tool_name: str) -> ToolSecurityProfile:
+        return ToxicFlowGraphAnalyzer.build_default_profile(
+            self.server_name,
+            tool_name,
+            workspace_root=self.workspace_root,
+        )
 
     def handle_server_to_client(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         req_id = msg.get("id")
@@ -203,29 +214,11 @@ class DynamicProfileAwareProxy(MCPJsonRpcProxy):
             for t in out["result"].get("tools", []):
                 t_name = t.get("name", "")
                 if t_name and t_name not in self.tool_profiles:
-                    roles = frozenset(ToxicFlowGraphAnalyzer.classify_tool(self.server_name, t))
-                    min_int = (
-                        Integrity.TRUSTED
-                        if (ToolRole.PRIVILEGED_MUTATOR in roles or ToolRole.EXTERNAL_EGRESS_SINK in roles)
-                        else Integrity.UNTRUSTED
-                    )
-                    max_conf = (
-                        Confidentiality.PUBLIC
-                        if ToolRole.EXTERNAL_EGRESS_SINK in roles
-                        else Confidentiality.SECRET
-                    )
-                    self.tool_profiles[t_name] = ToolSecurityProfile(
-                        server=self.server_name,
-                        tool_name=t_name,
-                        roles=roles,
-                        source_integrity=(
-                            Integrity.UNTRUSTED if ToolRole.UNTRUSTED_SOURCE in roles else Integrity.TRUSTED
-                        ),
-                        source_confidentiality=(
-                            Confidentiality.CONFIDENTIAL if ToolRole.PRIVATE_SOURCE in roles else Confidentiality.PUBLIC
-                        ),
-                        min_required_integrity=min_int,
-                        max_allowed_confidentiality=max_conf,
+                    self.tool_profiles[t_name] = ToxicFlowGraphAnalyzer.build_default_profile(
+                        self.server_name,
+                        t_name,
+                        str(t.get("description") or ""),
+                        workspace_root=self.workspace_root,
                     )
         return out
 
@@ -235,7 +228,8 @@ def run_stdio_wrapper(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_dir).resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
 
-    db_path = state_dir / "taint_state.db"
+    legacy_db = state_dir / "taint_state.db"
+    db_path = legacy_db if (legacy_db.exists() and not (state_dir / "taint.db").exists()) else (state_dir / "taint.db")
     lock_path = state_dir / "mcp-lock.json"
     audit_path = state_dir / "audit.jsonl"
 
@@ -266,6 +260,7 @@ def run_stdio_wrapper(args: argparse.Namespace) -> int:
         tool_profiles=profiles,
         step_up_callback=lambda _t, _a, _e: default_step_up,
         auto_pin_on_first_list=True,
+        workspace_root=workspace_root,
     )
 
     upstream_cmd = list(args.upstream_cmd)
@@ -427,11 +422,33 @@ def main() -> int:
     gen_p.add_argument("--workspace", default=".", help="Workspace root path")
     gen_p.add_argument("--output-dir", default=".", help="Directory to write example config files")
 
+    cs_p = subparsers.add_parser("compile-sandbox", help="Compile MCP schema into macOS Seatbelt SBPL or Linux bwrap/Landlock profile")
+    cs_p.add_argument("--workspace", default=".", help="Workspace root path")
+    cs_p.add_argument("--os", choices=["auto", "macos", "linux"], default="auto", help="Target OS kernel")
+    cs_p.add_argument("--allow-network", action="store_true", help="Allow outbound network sockets in kernel profile")
+    cs_p.add_argument("--output", default=None, help="Output file path for kernel profile")
+
+    bench_p = subparsers.add_parser("bench", help="Execute 800-scenario MCP-SecBench & Live Ecological evaluation suite")
+    bench_p.add_argument("--suite-dir", default=None, help="Optional suite directory")
+
     parsed = parser.parse_args()
     if parsed.subcommand == "wrap":
         return run_stdio_wrapper(parsed)
     if parsed.subcommand == "generate-config":
         return generate_configs(parsed)
+    if parsed.subcommand == "compile-sandbox":
+        from mcp_cage_core import run_compile_sandbox_cli
+
+        return run_compile_sandbox_cli(
+            workspace=parsed.workspace,
+            target_os=parsed.os,
+            allow_network=parsed.allow_network,
+            output_path=parsed.output,
+        )
+    if parsed.subcommand == "bench":
+        from mcp_cage_core import run_secbench_cli
+
+        return run_secbench_cli(suite_dir=parsed.suite_dir)
     return 1
 
 

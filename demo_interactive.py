@@ -1,7 +1,7 @@
 """
-Comprehensive V3 Verification & Interactive Demo for `mcp-cage` & `mcp-sploit`.
+Comprehensive 5-Act Verification & Interactive Demo for `mcp-cage` & `mcp-sploit`.
 
-Verifies every fix from `critic_and_usability_audit.md`:
+Verifies core security and usability guarantees:
 - Act 1: `mcp-sploit` V3 word-boundary + MCP 2025 `annotations` classification (zero false positives on `search_files`/`create_virtualenv`).
 - Act 2: Cross-Process SQLite Secret Vault (Process 1 `filesystem` mints tokens -> Process 2 `slack` blocks them via shared SQLite WAL).
 - Act 3: Dynamic Argument/Content Tainting (`README.md` + teammate issue = zero false-positive popups!).

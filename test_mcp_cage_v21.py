@@ -1,7 +1,7 @@
 """
-Comprehensive test suite for Track 3 (v2.1): `mcp-cage` & `mcp-sploit`.
+Comprehensive Dual-Plane & Core Primitive Test Suite for `mcp-cage` & `mcp-sploit`.
 
-Verifies all 6 code-level security gaps identified in `critic_feedback_v2.md` plus the
+Verifies Dual-Lattice IFC, SQLite WAL Secret Vault, SSRF/DNS Exfiltration Guard, Workspace Config Auditor, and the
 Dual-Plane CLI (`mcp-cage wrap`, `mcp-cage hook <claude|gemini|agy|codex|cursor>`, `audit`, `status`, `reset`).
 
 Run with:

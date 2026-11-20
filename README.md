@@ -6,13 +6,14 @@
 [![Live Interactive Web Showcase](https://img.shields.io/badge/🌐%20Live%20Interactive%20Sandbox-nagarajulu.github.io%2Fmcp--cage-06b6d4?style=for-the-badge)](https://nagarajulu.github.io/mcp-cage/)
 
 [![CI — mcp-cage Security Suite](https://github.com/nagarajulu/mcp-cage/actions/workflows/ci.yml/badge.svg)](https://github.com/nagarajulu/mcp-cage/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/mcp-cage.svg)](https://pypi.org/project/mcp-cage/)
 [![Interactive Web Demo](https://img.shields.io/badge/Interactive%20Demo-Live%20Exploit%20%26%20Config%20Sandbox-3b82f6.svg)](https://nagarajulu.github.io/mcp-cage/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](pyproject.toml)
 [![Dependencies: Zero](https://img.shields.io/badge/dependencies-zero%20(100%25%20stdlib)-success.svg)](pyproject.toml)
 
 > 🚀 **Try the Live Interactive Web Sandbox in Your Browser:** [**`https://nagarajulu.github.io/mcp-cage/`**](https://nagarajulu.github.io/mcp-cage/)  
-> Explore the **5 Integration Modes** (`wrap`, `hook`, `shell`, Python SDK, `mcp-sploit`), inspect the **8-Plane Security Feature Matrix**, replay **V1 Failure vs. V0.2.2 Blocked Exploits** on the live $(P \times U \Rightarrow S)$ graph, and generate copy-paste configs for **Claude Code, Cursor, Gemini CLI, Antigravity (`agy`), Codex, Claude Desktop, and LangGraph**.
+> Explore the **5 Integration Modes** (`wrap`, `hook`, `shell`, Python SDK, `mcp-sploit`), inspect the **8-Plane Security Feature Matrix**, replay **V1 Failure vs. v0.4.0 Blocked Exploits** on the live $(P \times U \Rightarrow S)$ graph, and generate copy-paste configs for **Claude Code, Cursor, Gemini CLI, Antigravity (`agy`), Codex, Claude Desktop, and LangGraph**.
 
 ---
 
@@ -53,27 +54,61 @@ When all three meet in a single session—Simon Willison's **Lethal Trifecta**�
 - **On-the-Wire Tool Sanitization & Rug-Pull Detection (`SchemaLockVerifier`):** Strips `<IMPORTANT>`, `<system>`, HTML comments, and cross-server shadowing directives from `tools/list` descriptions prior to SHA-256 pinning in `mcp-lock.json`.
 - **Workspace Config Auditor (`mcp-cage audit-config`):** Scans `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and `claude_desktop_config.json` for `CurXecute` relative-path RCE (`./`, `../`, `/tmp/`, `bash -c`, command chaining), hardcoded plaintext API keys in `env` blocks, and unwrapped MCP servers.
 
+### 5. Zero-Config Empirical Wire-Level Parameter Guards (`v0.3.0`)
+Automatically enforced out of the box by `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy`, and Plane B hooks:
+- **Runtime Endpoint & Session Re-pointing Guard (`endpoint_repoint_guard`):** Blocks runtime connection-mutation tools (`connect_to_*`, `switch_server`, `set_endpoint`, `configure_connection`) unless explicitly opted in, and blocks mid-session `*_url` + `*_token`/`*_key` repointing to `local`, `localhost`, `127.0.0.1`, `169.254.169.254`, RFC1918, or untrusted hosts as well as raw bearer tokens in LLM context (`GHSA-rvjm-7hvp-f868`).
+- **Embedded POSIX Command Substitution Guard (`path_command_substitution_guard` + `make_workspace_path_guard`):** Inspects `folderPath`, `filePath`, `source_dir`, `app_dir`, `working_directory`, `download_directory`, `destination`, and `path` for `$(...)`, `` `...` ``, and `${...}` even when disguised inside a valid relative workspace path segment (`CWE-78`).
+- **REST URL Path-Segment Traversal Guard (`url_path_segment_guard`):** Blocks `..`, `%2e%2e`, `/`, `%2f`, `\`, `?`, and `#` (including URL-decoded/double-encoded forms) across `*_id`, `*Id`, `*Name`, `scriptName`, `job_id`, `session_id`, `rag_id`, `bucket`, and `repo` before REST URL interpolation (`CWE-22`).
+- **CLI Positional-Argument Flag Injection Guard (`cli_flag_injection_guard`):** Blocks leading `-` / `--` flags (`--upload-pack=`, `--template=`, `--kubeconfig=`, `--token=`, `--output=`) injected into positional resource, directory, or target arguments (`CWE-88`).
+- **Multi-Statement & Clause-Level SQL AST Guard (`sql_safety_guard`):** Strips `--` and `/* ... */` comments (both space-joined and compact to defeat token splitting), detects stacked `;` queries, and enforces SQLi checks across `where_clause`, `order_by`, `filter`, `having`, `sort_by`, and `group_by` (`A4.3` / `A8.1`).
+
+### 6. Wire-DIFC 4-Slot Canonicalizer, Line-Span WAL Provenance & Kernel Sandbox Compiler (`v0.4.0`)
+- **Unconditional 4-Slot Wire Canonicalizer (`WireDIFCCanonicalizer`):** Neutralizes Day-0 tool-provider misbinding and comparative authority inflation (`S_poison >= 0.45`) on `tools/list`.
+- **Content-Addressed Line-Span Persistent Provenance (`PersistentLineSpanProvenance`):** Tracks SHA-256 line-span taint in SQLite WAL across `CLAUDE.md`, `.cursorrules`, and `MEMORY.md` to defeat cross-session stored prompt injection without freezing clean lines.
+- **Destination-Bound Format-Preserving Secret Vault (`DestinationBoundFPEVault`) & Covert Identifier Guard (`is_covert_exfil_identifier`):** Prevents confused-deputy secret oracle forwarding and detects natural-language EFF Diceware / high-entropy identifier exfiltration.
+- **Causal State-Progress Entropy Governor (`CausalStateProgressGovernor`) & Kernel Sandbox Compiler (`mcp-cage compile-sandbox`):** Arrests cyclic `OverServe` polling amplification loops and compiles stratified macOS Seatbelt SBPL / Linux Landlock/`bwrap` containment profiles.
+
+---
+
+## Empirical Co-Design Evolution (`v0.1.0` → `v0.2.2` → `v0.3.0` → `v0.4.0`)
+
+Each `mcp-cage` release translates real-world vulnerability classes uncovered across audited public and Big-Tech MCP servers into general-purpose, zero-config architectural capabilities:
+
+| Release | Architectural Milestone | Real-World Audited MCP Servers / Incidents Addressed | Generalized Guard Plane |
+| :--- | :--- | :--- | :--- |
+| **`v0.1.0`** | Dual-Lattice IFC & Wire Prototype | Invariant Labs GitHub MCP Exploit, `MCPTox`, Microsoft Spotlighting, `MELON` | `SessionTaintStateMachine`, `SchemaLockVerifier` (`mcp-lock.json`), randomized datamarking boundaries, `ToxicFlowGraphAnalyzer` (`mcp-sploit`). |
+| **`v0.2.2`** | Cross-Process WAL & Dual-Plane Firewall | `CVE-2025-53110`, `CVE-2025-53773` (Copilot YOLO), `CVE-2025-54135` (`CurXecute`), AWS IMDSv1 SSRF, DNS exfiltration | Shared SQLite WAL `BidirectionalSecretScrubber`, `BEGIN IMMEDIATE` atomic taint, `validate_outbound_network_target` (IMDS/RFC1918/Shannon DNS), `WorkspaceMCPConfigAuditor`, Plane A + Plane B hooks. |
+| **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), Cloud Container Deployment MCP Servers (`CWE-78`), Edge & API Gateway MCP Servers (`CWE-22` REST path-segment traversal), Kubernetes & Infrastructure CLI MCP Servers (`CWE-88` positional flag injection), Enterprise Data Warehouse & Relational SQL MCP Servers (`CWE-89` comment-split & clause injection) | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
+| **`v0.4.0`** | Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Compiler | Day-0 Non-Collision Tool-Provider Misbinding, Cross-Session Stored XPIA (`CLAUDE.md`), `OverServe` Resource Amplification ($93.88\times$), EFF Diceware Covert Identifiers, Missing OS Kernel Containment | `WireDIFCCanonicalizer` (`S_poison >= 0.45` + 4-Slot Canonicalizer), `PersistentLineSpanProvenance` (`persistent_span_taint`), `DestinationBoundFPEVault`, `CausalStateProgressGovernor`, `SchemaToKernelSandboxCompiler` (`mcp-cage compile-sandbox` Seatbelt SBPL / Landlock), `mcp-cage bench`. |
+
 ---
 
 ## Quick Start (Zero Dependencies)
 
 ```bash
+# Install directly from PyPI (or run zero-install via `uvx mcp-cage --help`):
+pip install mcp-cage
+
+# Or install from source:
 git clone https://github.com/nagarajulu/mcp-cage.git
 cd mcp-cage
 pip install -e .
 
-# 1. Run the 5-Act Interactive Verification Demo
-python3 demo_interactive.py
+# 1. Run the Unified 6-Suite Non-Regression & 9-Plane E2E Verification Runner
+python3 run_all_regression_suites.py
 
-# 2. Run the Full Unit & 8-Plane E2E Security Test Suites
-python3 test_mcp_cage_v21.py -v
-python3 test_e2e_all_8_planes.py
+# 2. Compile an OS Kernel Seatbelt SBPL (macOS) or Landlock/bwrap (Linux) Sandbox Profile
+mcp-cage compile-sandbox --workspace . --os auto
 
 # 3. Audit workspace MCP configs for CurXecute RCE & hardcoded secrets
 mcp-cage audit-config
 
 # 4. Run static Toxic-Flow Graph Analysis (mcp-sploit)
 mcp-sploit audit
+
+# 5. Day-1 Zero-Friction Onboarding: Start in '--mode shadow' (logs alerts to .mcp-cage/audit.jsonl without blocking)
+#    then switch to '--mode enforce' once verified in your workflow:
+mcp-cage wrap --server filesystem --workspace . --mode shadow -- npx -y @modelcontextprotocol/server-filesystem .
 ```
 
 ---
@@ -183,11 +218,11 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 
 ---
 
-## Research Foundations & Academic Lineage
+## Foundational Security & Information-Flow Control References
 
-`mcp-cage` translates foundational Operating Systems & Agentic Information-Flow Control (IFC) research into a zero-dependency runtime firewall:
+`mcp-cage` builds on established Operating Systems & Agentic Information-Flow Control (IFC) research:
 
-| Research System / Paper | Reference | Core Concept Adapted in `mcp-cage` |
+| Published System / Paper | Reference | Core Concept Adapted in `mcp-cage` |
 | :--- | :--- | :--- |
 | **CaMeL** *(Debenedetti et al., Google DeepMind, 2025)* | [`arXiv:2503.18813`](https://arxiv.org/abs/2503.18813) | Separating data capabilities & provenance from untrusted control flow in LLM tool invocations. |
 | **FIDES** *(Costa et al., Microsoft Research, 2025)* | [`arXiv:2505.23643`](https://arxiv.org/abs/2505.23643) | Dual-lattice Information-Flow Control (Integrity $\times$ Confidentiality labels) with deterministic sink gates. |
@@ -195,7 +230,6 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 | **MELON** *(Zhu et al., 2025)* | [`arXiv:2502.05174`](https://arxiv.org/abs/2502.05174) | Provenance attribution blocking target arguments (URLs, domains, emails) extracted from untrusted tool outputs. |
 | **Spotlighting** *(Hines et al., Microsoft, 2024)* | [`arXiv:2403.14720`](https://arxiv.org/abs/2403.14720) | Cryptographically randomized datamarking boundaries (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) with anti-spoofing. |
 | **MCPTox** *(Wang et al., 2025)* | [`arXiv:2508.14925`](https://arxiv.org/abs/2508.14925) | Structural sanitization of poisoned MCP tool descriptions and cross-server shadowing detection (`SchemaLockVerifier`). |
-| **FLOWSEAL** *(Aerakoni, 2026)* | `arXiv:2609.14003` | Cross-process SQLite WAL ambient taint state machine & bidirectional secret vault across Plane A + Plane B. |
 | **HiStar / Flume / Capsicum** *(Zeldovich et al., Krohn et al., Watson et al.)* | *OSDI '06 / SOSP '07 / USENIX '10* | Decentralized IFC labels, explicit human declassification leases, and OS-level capability confinement. |
 
 ---
@@ -208,9 +242,15 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 | [`mcp_cage_proxy.py`](mcp_cage_proxy.py) | Full JSON-RPC 2.0 wire proxy (`MCPJsonRpcProxy` & `StdioSubprocessBridge`) covering `tools/list`, `tools/call`, `resources/read`, `prompts/get`, and `sampling/createMessage`. |
 | [`mcp_cage_cli.py`](mcp_cage_cli.py) | Standalone `stdio` process wrapper (`mcp-cage wrap`) with dynamic `tools/list` classification and config generator. |
 | [`demo_interactive.py`](demo_interactive.py) | 5-Act interactive terminal walkthrough demonstrating every defense end-to-end. |
-| [`test_mcp_cage_v21.py`](test_mcp_cage_v21.py) | Comprehensive V2.2 unit & integration test suite (10 test suites including SSRF/DNS exfil & `CurXecute` config auditing). |
-| [`test_e2e_all_8_planes.py`](test_e2e_all_8_planes.py) | 8-Plane End-to-End security test suite (17 tests across cognitive, protocol, trifecta, parameter, memory, and subprocess planes). |
-| [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, V1 vs. V0.2.2 Exploit Simulator, Config Generator & 1966–2026 Research Lineage ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
+| [`test_mcp_cage_v40_wiredifc_and_secbench.py`](test_mcp_cage_v40_wiredifc_and_secbench.py) | v0.4.0 regression suite covering the 4-Slot Wire Canonicalizer, Line-Span WAL Provenance, Destination-Bound FPE Vault, Diceware Covert Identifier Detector, Causal Progress Governor, and Kernel Sandbox Compiler. |
+| [`test_mcp_cage_v30_empirical_guards.py`](test_mcp_cage_v30_empirical_guards.py) | Empirical wire guard regression suite covering Jupyter runtime hijack (`GHSA-rvjm-7hvp-f868`), embedded command substitution (`CWE-78`), REST path traversal (`CWE-22`), CLI flag injection (`CWE-88`), SQLi (`CWE-89`), and sub-millisecond latency. |
+| [`test_agentic_ai_tools_and_non_regression.py`](test_agentic_ai_tools_and_non_regression.py) | Multi-agent framework guards (split `directory`+`filename`, PEP 508 package install, Python sandbox dunder escape), stdlib purity AST test, and latency budget verification. |
+| [`test_mcp_cage_v21.py`](test_mcp_cage_v21.py) | Comprehensive unit & integration test suite (10 test suites including SSRF/DNS exfil & `CurXecute` config auditing). |
+| [`test_e2e_all_8_planes.py`](test_e2e_all_8_planes.py) | End-to-End security test suite across cognitive, protocol, trifecta, parameter, memory, and subprocess planes. |
+| [`test_tier2_real_mcp_and_canary.py`](test_tier2_real_mcp_and_canary.py) | Multi-process `stdio` integration suite against the official Node.js `@modelcontextprotocol/server-filesystem` and a live local HTTP Canary Listener. |
+| [`run_all_regression_suites.py`](run_all_regression_suites.py) | Unified single-command non-regression verification runner executing all 7 test suites. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release changelog (`v0.1.0` → `v0.2.2` → `v0.3.0` → `v0.4.0`). |
+| [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, Live Exploit Simulator, Config Generator & IFC References ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
 
 ---
 
