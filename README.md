@@ -80,6 +80,7 @@ Each `mcp-cage` release translates real-world vulnerability classes uncovered ac
 | **`v0.2.2`** | Cross-Process WAL & Dual-Plane Firewall | `CVE-2025-53110`, `CVE-2025-53773` (Copilot YOLO), `CVE-2025-54135` (`CurXecute`), AWS IMDSv1 SSRF, DNS exfiltration | Shared SQLite WAL `BidirectionalSecretScrubber`, `BEGIN IMMEDIATE` atomic taint, `validate_outbound_network_target` (IMDS/RFC1918/Shannon DNS), `WorkspaceMCPConfigAuditor`, Plane A + Plane B hooks. |
 | **`v0.3.0`** | Empirical Zero-Config Wire Guards | `datalayer/jupyter-mcp-server` (`GHSA-rvjm-7hvp-f868`), Cloud Container Deployment MCP Servers (`CWE-78`), Edge & API Gateway MCP Servers (`CWE-22` REST path-segment traversal), Kubernetes & Infrastructure CLI MCP Servers (`CWE-88` positional flag injection), Enterprise Data Warehouse & Relational SQL MCP Servers (`CWE-89` comment-split & clause injection) | `endpoint_repoint_guard`, `path_command_substitution_guard` + hardened `make_workspace_path_guard`, `url_path_segment_guard`, `cli_flag_injection_guard`, comment-stripping & clause-level `sql_safety_guard`. |
 | **`v0.4.0`** | Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Compiler | Day-0 Non-Collision Tool-Provider Misbinding, Cross-Session Stored XPIA (`CLAUDE.md`), `OverServe` Resource Amplification ($93.88\times$), EFF Diceware Covert Identifiers, Missing OS Kernel Containment | `WireDIFCCanonicalizer` (`S_poison >= 0.45` + 4-Slot Canonicalizer), `PersistentLineSpanProvenance` (`persistent_span_taint`), `DestinationBoundFPEVault`, `CausalStateProgressGovernor`, `SchemaToKernelSandboxCompiler` (`mcp-cage compile-sandbox` Seatbelt SBPL / Landlock), `mcp-cage bench`. |
+| **`v0.4.1`** | Modular Package Architecture (`mcp_cage/`), Declarative Policy Loader & 25-Mechanism CWE Paired-Twin Matrix | 25 Empirical CWE Vulnerability Mechanisms (75+ attack payloads paired with 35+ benign twins across Plane A & Plane B), Enterprise Declarative Policy Configuration (`.mcp-cage/policy.json`) | Modular `mcp_cage.{core,lattice,vault,schema,guards,surfaces,policy,proxy,cli}` package hierarchy, `MCPCagePolicyConfig`, 10-suite non-regression & 7-Gate OPSEC runner (`run_all_regression_suites.py`). |
 
 ---
 
@@ -94,7 +95,7 @@ git clone https://github.com/nagarajulu/mcp-cage.git
 cd mcp-cage
 pip install -e .
 
-# 1. Run the Unified 6-Suite Non-Regression & 9-Plane E2E Verification Runner
+# 1. Run the Unified 10-Suite Non-Regression, 25-Mechanism CWE Matrix & 7-Gate OPSEC Runner
 python3 run_all_regression_suites.py
 
 # 2. Compile an OS Kernel Seatbelt SBPL (macOS) or Landlock/bwrap (Linux) Sandbox Profile
@@ -236,20 +237,63 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 
 ## Repository Structure
 
-| File | Description |
+```text
+mcp-cage/
+├── mcp_cage/                                                   # Modular Zero-Dependency Python Package
+│   ├── __init__.py                                             # Public API exports
+│   ├── core.py                                                 # Core Wire-DIFC reference monitor engine
+│   ├── lattice.py                                              # Dual-Axis Taint Lattice, SQLite WAL State Machine, Line-Span Provenance
+│   ├── vault.py                                                # Bidirectional Secret Scrubber, FPE Vault, Covert Entropy Detectors
+│   ├── schema.py                                               # 4-Slot Canonicalizer, SchemaLockVerifier, ToxicFlowGraphAnalyzer
+│   ├── guards.py                                               # 25 Empirical CWE Parameter Guards (StandardArgGuards, SSRF, Workspace Jail)
+│   ├── surfaces.py                                             # Plane A (MCPWireGateway), Plane B (handle_cli_hook), Kernel Sandbox Compiler
+│   ├── policy.py                                               # Declarative Enterprise Policy Loader (.mcp-cage/policy.json)
+│   ├── proxy.py                                                # Full JSON-RPC 2.0 wire proxy (MCPJsonRpcProxy & StdioSubprocessBridge)
+│   ├── cli_runner.py                                           # Standalone stdio process wrapper (mcp-cage wrap) & config generator
+│   └── cli.py                                                  # Unified mcp-cage & mcp-sploit CLI entrypoint
+│
+├── tests/                                                      # Structured Verification & Regression Hierarchy
+│   ├── unit/
+│   │   ├── test_ifc_lattice_and_wal_vault.py                   # Core IFC lattice, WAL vault, SSRF/DNS & CurXecute config auditor suite
+│   │   ├── test_empirical_guards.py                            # Empirical wire guard & sub-millisecond latency suite
+│   │   ├── test_wiredifc_canonicalizer_and_sandbox.py          # 4-Slot Canonicalizer, Line-Span WAL, FPE Vault & Kernel Sandbox suite
+│   │   └── test_modular_package_and_policy.py                  # Modular package exports & declarative policy (.mcp-cage/policy.json) suite
+│   ├── cwe_catalog/
+│   │   ├── test_cwe_paired_twin_matrix.py                      # 25-Mechanism Empirical CWE Paired-Twin Matrix (Plane A & Plane B parity)
+│   │   └── test_agentic_ai_frameworks.py                       # Agentic AI frameworks, Python sandbox guards & stdlib-purity AST suite
+│   ├── e2e/
+│   │   ├── test_tier1_all_8_planes.py                          # Tier 1: 8-Plane E2E adversarial verification harness
+│   │   └── test_tier2_real_mcp_and_canary.py                   # Tier 2: Official Node.js MCP server + live HTTP canary listener
+│   └── fixtures/
+│       └── mock_mcp_server.py                                  # Deterministic mock stdio MCP server for offline E2E tests
+│
+├── examples/
+│   └── demo_interactive.py                                     # 5-Act interactive terminal walkthrough demonstrating every defense
+├── docs/index.html & visualizer.html                           # Interactive browser simulator & GitHub Pages showcase
+├── .githooks/pre-commit                                        # Automated 7-Gate OPSEC, Embargo, Personal-Path & Docs-Sync scanner
+├── run_all_regression_suites.py                                # Unified 1-command runner executing all 10 verification suites
+├── CONTRIBUTING.md                                             # Architecture guide & Paired-Twin CWE Promotion Contract
+├── CHANGELOG.md                                                # Release changelog (v0.1.0 -> v0.2.2 -> v0.3.0 -> v0.4.0 -> v0.4.1)
+└── SECURITY.md                                                 # Coordinated vulnerability disclosure policy
+```
+
+| Path | Description |
 | :--- | :--- |
-| [`mcp_cage_core.py`](mcp_cage_core.py) | Unified core engine: `SessionTaintStateMachine`, `BidirectionalSecretScrubber`, `SchemaLockVerifier`, `ToxicFlowGraphAnalyzer`, `WorkspaceMCPConfigAuditor`, SSRF/DNS Exfil Guard, `MCPWireGateway`, and Dual-Plane CLI (`mcp-cage` / `mcp-sploit`). |
-| [`mcp_cage_proxy.py`](mcp_cage_proxy.py) | Full JSON-RPC 2.0 wire proxy (`MCPJsonRpcProxy` & `StdioSubprocessBridge`) covering `tools/list`, `tools/call`, `resources/read`, `prompts/get`, and `sampling/createMessage`. |
-| [`mcp_cage_cli.py`](mcp_cage_cli.py) | Standalone `stdio` process wrapper (`mcp-cage wrap`) with dynamic `tools/list` classification and config generator. |
-| [`demo_interactive.py`](demo_interactive.py) | 5-Act interactive terminal walkthrough demonstrating every defense end-to-end. |
-| [`test_mcp_cage_v40_wiredifc_and_secbench.py`](test_mcp_cage_v40_wiredifc_and_secbench.py) | v0.4.0 regression suite covering the 4-Slot Wire Canonicalizer, Line-Span WAL Provenance, Destination-Bound FPE Vault, Diceware Covert Identifier Detector, Causal Progress Governor, and Kernel Sandbox Compiler. |
-| [`test_mcp_cage_v30_empirical_guards.py`](test_mcp_cage_v30_empirical_guards.py) | Empirical wire guard regression suite covering Jupyter runtime hijack (`GHSA-rvjm-7hvp-f868`), embedded command substitution (`CWE-78`), REST path traversal (`CWE-22`), CLI flag injection (`CWE-88`), SQLi (`CWE-89`), and sub-millisecond latency. |
-| [`test_agentic_ai_tools_and_non_regression.py`](test_agentic_ai_tools_and_non_regression.py) | Multi-agent framework guards (split `directory`+`filename`, PEP 508 package install, Python sandbox dunder escape), stdlib purity AST test, and latency budget verification. |
-| [`test_mcp_cage_v21.py`](test_mcp_cage_v21.py) | Comprehensive unit & integration test suite (10 test suites including SSRF/DNS exfil & `CurXecute` config auditing). |
-| [`test_e2e_all_8_planes.py`](test_e2e_all_8_planes.py) | End-to-End security test suite across cognitive, protocol, trifecta, parameter, memory, and subprocess planes. |
-| [`test_tier2_real_mcp_and_canary.py`](test_tier2_real_mcp_and_canary.py) | Multi-process `stdio` integration suite against the official Node.js `@modelcontextprotocol/server-filesystem` and a live local HTTP Canary Listener. |
-| [`run_all_regression_suites.py`](run_all_regression_suites.py) | Unified single-command non-regression verification runner executing all 7 test suites. |
-| [`CHANGELOG.md`](CHANGELOG.md) | Release changelog (`v0.1.0` → `v0.2.2` → `v0.3.0` → `v0.4.0`). |
+| [`mcp_cage/`](mcp_cage/__init__.py) ([`mcp_cage/core.py`](mcp_cage/core.py)) | Modular security engine package (`lattice`, `vault`, `schema`, `guards`, `surfaces`, `policy`, `proxy`, `cli`). Also accessible via the root [`mcp_cage_core.py`](mcp_cage_core.py) compatibility shim. |
+| [`mcp_cage/proxy.py`](mcp_cage/proxy.py) | Full JSON-RPC 2.0 wire proxy (`MCPJsonRpcProxy` & `StdioSubprocessBridge`) covering `tools/list`, `tools/call`, `resources/read`, `prompts/get`, and `sampling/createMessage`. |
+| [`mcp_cage/cli_runner.py`](mcp_cage/cli_runner.py) | Standalone `stdio` process wrapper (`mcp-cage wrap`) with dynamic `tools/list` classification and config generator. |
+| [`examples/demo_interactive.py`](examples/demo_interactive.py) | 5-Act interactive terminal walkthrough demonstrating every defense end-to-end. |
+| [`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`](tests/cwe_catalog/test_cwe_paired_twin_matrix.py) | 25-Mechanism Empirical CWE Paired-Twin Matrix verifying 75+ `[ATTACK_BLOCKED]` payloads paired with 35+ `[BENIGN_ALLOWED]` twins across Plane A and Plane B. |
+| [`tests/cwe_catalog/test_agentic_ai_frameworks.py`](tests/cwe_catalog/test_agentic_ai_frameworks.py) | Multi-agent framework guards (split `directory`+`filename`, PEP 508 package install, Python sandbox dunder escape), stdlib purity AST test, and latency budget verification. |
+| [`tests/unit/test_wiredifc_canonicalizer_and_sandbox.py`](tests/unit/test_wiredifc_canonicalizer_and_sandbox.py) | Wire-DIFC regression suite covering the 4-Slot Wire Canonicalizer, Line-Span WAL Provenance, Destination-Bound FPE Vault, Diceware Covert Identifier Detector, Causal Progress Governor, and Kernel Sandbox Compiler. |
+| [`tests/unit/test_empirical_guards.py`](tests/unit/test_empirical_guards.py) | Empirical wire guard regression suite covering Jupyter runtime hijack (`GHSA-rvjm-7hvp-f868`), embedded command substitution (`CWE-78`), REST path traversal (`CWE-22`), CLI flag injection (`CWE-88`), SQLi (`CWE-89`), and sub-millisecond latency. |
+| [`tests/unit/test_ifc_lattice_and_wal_vault.py`](tests/unit/test_ifc_lattice_and_wal_vault.py) | Core IFC lattice, WAL vault, SSRF/DNS exfiltration & `CurXecute` config auditing unit & integration suite. |
+| [`tests/unit/test_modular_package_and_policy.py`](tests/unit/test_modular_package_and_policy.py) | Modular package submodule exports & declarative enterprise policy (`.mcp-cage/policy.json`) verification suite. |
+| [`tests/e2e/test_tier1_all_8_planes.py`](tests/e2e/test_tier1_all_8_planes.py) | Tier 1 End-to-End security test suite across cognitive, protocol, trifecta, parameter, memory, and subprocess planes. |
+| [`tests/e2e/test_tier2_real_mcp_and_canary.py`](tests/e2e/test_tier2_real_mcp_and_canary.py) | Tier 2 multi-process `stdio` integration suite against the official Node.js `@modelcontextprotocol/server-filesystem` and a live local HTTP Canary Listener. |
+| [`run_all_regression_suites.py`](run_all_regression_suites.py) | Unified single-command non-regression verification runner executing all 10 verification suites (including `.githooks/pre-commit`). |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributor architecture guide and the mandatory Paired-Twin CWE Promotion Contract (`EmpiricalCWETwinSpec`). |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release changelog (`v0.1.0` → `v0.2.2` → `v0.3.0` → `v0.4.0` → `v0.4.1`). |
 | [`docs/index.html`](docs/index.html) / [`visualizer.html`](visualizer.html) | Interactive browser-based showcase: 5 Integration Modes, 8-Plane Security Matrix, Live Exploit Simulator, Config Generator & IFC References ([live on GitHub Pages](https://nagarajulu.github.io/mcp-cage/)). |
 
 ---

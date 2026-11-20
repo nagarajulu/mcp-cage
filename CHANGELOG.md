@@ -5,6 +5,20 @@ All notable changes to `mcp-cage` are documented in this file.
 
 ---
 
+## [0.4.1] — 2026-11-19
+
+### Added — Modular `mcp_cage/` Package Architecture, Declarative Policy Loader & 25-Mechanism CWE Paired-Twin Matrix
+1. **Modular Domain Package Hierarchy (`mcp_cage/`)**
+   - Organized all product source code under [`mcp_cage/`](mcp_cage/__init__.py) (`core.py`, `lattice.py`, `vault.py`, `schema.py`, `guards.py`, `surfaces.py`, `policy.py`, `proxy.py`, `cli_runner.py`, `cli.py`) while retaining a lightweight [`mcp_cage_core.py`](mcp_cage_core.py) re-export alias at the repository root for backward compatibility.
+2. **Declarative Enterprise Policy Configuration Loader (`mcp_cage.policy.MCPCagePolicyConfig`)**
+   - Supports zero-code workspace policy customization via `.mcp-cage/policy.json` or `mcp-cage.json` (`mode`, `allowed_orgs`, `trusted_endpoints`, `allow_endpoint_repoint`, `financial_cap_usd`, `custom_tool_roles`).
+3. **25-Mechanism Empirical CWE Paired-Twin Regression Matrix (`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`)**
+   - Locks in 75+ `[ATTACK_BLOCKED]` payloads paired with 35+ `[BENIGN_ALLOWED]` twins across all 25 empirical CWE vulnerability mechanisms, verified across both Plane A (`MCPWireGateway`) and Plane B (`handle_cli_hook`).
+4. **Structured `tests/` & `examples/` Layout + 7-Gate OPSEC Pre-Commit Scanner (`.githooks/pre-commit`)**
+   - Organized test suites by verification tier under `tests/unit/`, `tests/cwe_catalog/`, `tests/e2e/`, and `tests/fixtures/`, moved the 5-act interactive demo to `examples/demo_interactive.py`, and added [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
+
 ## [0.4.0] — 2026-11-18
 
 ### Added — Wire-DIFC v2/v3, 4-Slot Provider-Binding Canonicalizer, Line-Span WAL Provenance & Kernel Sandbox Compiler

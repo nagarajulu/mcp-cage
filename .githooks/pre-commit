@@ -103,6 +103,21 @@ def main() -> int:
                 "[GATE7_SHOWCASE_HTML_DRIFT] 'visualizer.html' and 'docs/index.html' differ; copy visualizer.html to docs/index.html."
             )
 
+    # Gate 8: Markdown relative file-link integrity check (`README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`)
+    md_link_re = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+    for md_file in sorted(REPO_ROOT.glob("*.md")):
+        md_txt = md_file.read_text(encoding="utf-8", errors="ignore")
+        for lineno, line in enumerate(md_txt.splitlines(), start=1):
+            for m in md_link_re.finditer(line):
+                target = m.group(1).strip()
+                if target.startswith(("http://", "https://", "mailto:", "#")):
+                    continue
+                rel = target.split("#")[0]
+                if rel and not (REPO_ROOT / rel).exists():
+                    violations.append(
+                        f"[GATE8_BROKEN_DOC_LINK] {md_file.name}:{lineno}: target '{rel}' does not exist in repository."
+                    )
+
     # Gate 1 (Git History): Scan recent git commit messages
     log_out = subprocess.check_output(
         ["git", "log", "-n", "25", "--oneline"], cwd=REPO_ROOT, text=True

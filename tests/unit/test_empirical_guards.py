@@ -1,5 +1,5 @@
 """
-Empirical Guard Regression & Latency Test Suite for `mcp-cage` (`test_mcp_cage_v30_empirical_guards.py`).
+Empirical Guard Regression & Latency Test Suite for `mcp-cage` (`tests/unit/test_empirical_guards.py`).
 
 Tests all 5 real-world vulnerability classes uncovered across audited public and enterprise MCP servers,
 verified end-to-end through `MCPCageEngine` (`MCPWireGateway`) with zero manual configuration:

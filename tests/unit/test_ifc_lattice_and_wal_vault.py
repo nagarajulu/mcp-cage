@@ -5,7 +5,7 @@ Verifies Dual-Lattice IFC, SQLite WAL Secret Vault, SSRF/DNS Exfiltration Guard,
 Dual-Plane CLI (`mcp-cage wrap`, `mcp-cage hook <claude|gemini|agy|codex|cursor>`, `audit`, `status`, `reset`).
 
 Run with:
-    python3 -m unittest test_mcp_cage_v21.py -v
+    python3 tests/unit/test_ifc_lattice_and_wal_vault.py -v
 """
 
 from __future__ import annotations

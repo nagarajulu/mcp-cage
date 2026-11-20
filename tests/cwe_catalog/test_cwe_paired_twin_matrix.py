@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Empirical CWE Vulnerability Catalog & Paired-Twin Non-Regression Matrix
-(`test_cwe_empirical_catalog_matrix.py`).
+(`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`).
 
 Implements the 5 Security Reference-Monitor Test Suite Best Practices:
   1. Paired Dual-Assertion Contract (`[ATTACK_BLOCKED]` + `[BENIGN_ALLOWED]` Twins):

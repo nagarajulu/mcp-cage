@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Agentic AI Tools & Cross-Version Non-Regression Test Suite
-(`test_agentic_ai_tools_and_non_regression.py`).
+(`tests/cwe_catalog/test_agentic_ai_frameworks.py`).
 
 Covers two critical mandates:
 1. Open-Source Agentic AI Frameworks Beyond Standalone MCP Servers:

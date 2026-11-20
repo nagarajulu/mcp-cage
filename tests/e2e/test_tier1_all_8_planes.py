@@ -1,14 +1,14 @@
 """
-End-to-End (E2E) Automated Security Test Suite Across All 8 Attack Planes (`test_e2e_all_8_planes.py`).
+End-to-End (E2E) Automated Security Test Suite Across All 8 Attack Planes (`tests/e2e/test_tier1_all_8_planes.py`).
 
 Sets up isolated test environments (temp workspaces, symlinks, SQLite WAL vaults, and real child
 OS `stdio` MCP server subprocesses) for each of the 8 Attack Planes, fires the attack vectors,
 and asserts that `mcp-cage` & `mcp-sploit` detect and block them per expectation.
 
 Run with:
-    python3 test_e2e_all_8_planes.py
+    python3 tests/e2e/test_tier1_all_8_planes.py
 or:
-    python3 -m unittest test_e2e_all_8_planes.py -v
+    python3 -m unittest tests/e2e/test_tier1_all_8_planes.py -v
 """
 
 from __future__ import annotations

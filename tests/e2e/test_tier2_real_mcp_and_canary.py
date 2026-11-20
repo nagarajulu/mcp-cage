@@ -1,7 +1,7 @@
 """
-Tier 2 End-to-End Integration & Canary Test Suite (`test_tier2_real_mcp_and_canary.py`).
+Tier 2 End-to-End Integration & Canary Test Suite (`tests/e2e/test_tier2_real_mcp_and_canary.py`).
 
-Tests `mcp-cage` V3 (`mcp_cage_cli.py wrap`) against:
+Tests `mcp-cage` (`mcp_cage/cli_runner.py wrap`) against:
 1. Official Node.js `@modelcontextprotocol/server-filesystem` via `npx` over real OS stdio pipes.
 2. Live local HTTP Canary Exfiltration Listener (`127.0.0.1:<ephemeral_port>`) verifying 0 leaked packets.
 3. Multi-process cross-server Lethal Trifecta & Secret Vault enforcement across separate OS processes

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit & Integration Regression Suite for `mcp-cage` v0.4.0 (`test_mcp_cage_v40_wiredifc_and_secbench.py`).
+Unit & Integration Regression Suite for `mcp-cage` v0.4.x (`tests/unit/test_wiredifc_canonicalizer_and_sandbox.py`).
 Verifies:
 1. Unconditional 4-Slot Wire Canonicalizer & Authority Log-Odds Scorer (Defeats Provider Misbinding & White-Box Synonym Evasion).
 2. Content-Addressed Line-Span Persistent Provenance in SQLite WAL (Defeats Cross-Session Stored XPIA with 0% Shared-File FPR).
