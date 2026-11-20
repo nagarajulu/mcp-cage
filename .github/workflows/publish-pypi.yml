@@ -1,0 +1,63 @@
+name: Publish to PyPI (OIDC Trusted Publisher + PEP 740 Attestations)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Run Security Regression Suites & Build Distribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify Zero-Dependency Security & 9-Plane E2E Regression Suites
+        run: |
+          python3 test_mcp_cage_v30_empirical_guards.py -v
+          python3 test_mcp_cage_v21.py -v
+          python3 test_e2e_all_8_planes.py -v
+          python3 test_agentic_ai_tools_and_non_regression.py -v
+
+      - name: Install build frontend
+        run: python3 -m pip install --upgrade build
+
+      - name: Build sdist and wheel
+        run: python3 -m build
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-pypi:
+    name: Publish mcp-cage to PyPI via OIDC Trusted Publisher
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mcp-cage
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download built distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution to PyPI with PEP 740 Provenance Attestations
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
