@@ -81,14 +81,17 @@ def main() -> int:
         content = p.read_text(encoding="utf-8", errors="ignore")
         violations.extend(scan_text(rel_path, content))
 
-    # Gate 6: Version parity check (`pyproject.toml` vs `mcp_cage_core.__version__`)
+    # Gate 6: Version parity check (`pyproject.toml` vs `mcp_cage.core.__version__`)
     pyproject_txt = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    core_txt = (REPO_ROOT / "mcp_cage_core.py").read_text(encoding="utf-8")
+    core_file = REPO_ROOT / "mcp_cage" / "core.py"
+    if not core_file.is_file():
+        core_file = REPO_ROOT / "mcp_cage_core.py"
+    core_txt = core_file.read_text(encoding="utf-8")
     m_py = re.search(r'^version\s*=\s*"([^"]+)"', pyproject_txt, flags=re.MULTILINE)
     m_core = re.search(r'^__version__\s*=\s*"([^"]+)"', core_txt, flags=re.MULTILINE)
     if m_py and m_core and m_py.group(1) != m_core.group(1):
         violations.append(
-            f"[GATE6_VERSION_DRIFT] pyproject.toml version '{m_py.group(1)}' != mcp_cage_core.__version__ '{m_core.group(1)}'"
+            f"[GATE6_VERSION_DRIFT] pyproject.toml version '{m_py.group(1)}' != mcp_cage.core.__version__ '{m_core.group(1)}'"
         )
 
     # Gate 7: Showcase HTML parity check (`visualizer.html` == `docs/index.html`)

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     main,
     run_compile_sandbox_cli,
     run_secbench_cli,

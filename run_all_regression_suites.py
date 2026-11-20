@@ -2,15 +2,17 @@
 """
 Unified Non-Regression & OPSEC Verification Runner (`run_all_regression_suites.py`).
 
-Executes:
-  0. 6-Gate OPSEC, Embargo & Personal-Path Zero-Leak Scanner (`.githooks/pre-commit`)
-  1. V2.2 Core IFC, WAL Vault, SSRF/DNS & Config Auditor Suite (`test_mcp_cage_v21.py`)
-  2. v0.3.0 Empirical Guards Regression Suite (`test_mcp_cage_v30_empirical_guards.py`)
-  3. v0.4.0 Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Suite (`test_mcp_cage_v40_wiredifc_and_secbench.py`)
-  4. 8-Plane End-to-End Security Suite (`test_e2e_all_8_planes.py`)
-  5. Tier 2 Official Node.js MCP + Live HTTP Canary Suite (`test_tier2_real_mcp_and_canary.py`)
-  6. Agentic AI Toolkits & Cross-Version Non-Regression Suite (`test_agentic_ai_tools_and_non_regression.py`)
-  7. 5-Act Interactive End-to-End Verification Demo (`demo_interactive.py`)
+Executes all 10 verification suites across the modular `tests/` and `examples/` hierarchy:
+  0. 7-Gate OPSEC, Embargo, Personal-Path & Docs-Sync Pre-Commit Scanner (`.githooks/pre-commit`)
+  1. Core IFC Lattice, WAL Vault, SSRF/DNS & Config Auditor Suite (`tests/unit/test_ifc_lattice_and_wal_vault.py`)
+  2. Empirical Wire Guards & Latency Regression Suite (`tests/unit/test_empirical_guards.py`)
+  3. Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Suite (`tests/unit/test_wiredifc_canonicalizer_and_sandbox.py`)
+  4. Modular Package & Declarative Enterprise Policy Suite (`tests/unit/test_modular_package_and_policy.py`)
+  5. 25-Mechanism Empirical CWE Paired-Twin Matrix (`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`)
+  6. Agentic AI Frameworks & Stdlib Purity Non-Regression Suite (`tests/cwe_catalog/test_agentic_ai_frameworks.py`)
+  7. Tier 1: 8-Plane End-to-End Security Suite (`tests/e2e/test_tier1_all_8_planes.py`)
+  8. Tier 2: Official Node.js MCP + Live HTTP Canary Suite (`tests/e2e/test_tier2_real_mcp_and_canary.py`)
+  9. 5-Act Interactive End-to-End Verification Demo (`examples/demo_interactive.py`)
 """
 
 from __future__ import annotations
@@ -28,52 +30,51 @@ PROTOTYPE_DIR = Path(__file__).resolve().parent
 def build_suites() -> list[tuple[str, list[str]]]:
     suites: list[tuple[str, list[str]]] = [
         (
-            "0. 6-Gate OPSEC, Embargo & Zero-Leak Pre-Commit Scanner (.githooks/pre-commit)",
+            "0. 7-Gate OPSEC, Embargo & Zero-Leak Pre-Commit Scanner (.githooks/pre-commit)",
             [sys.executable, str(PROTOTYPE_DIR / ".githooks" / "pre-commit")],
         ),
         (
-            "1. V2.2 Core IFC, WAL Vault, SSRF/DNS & Config Auditor Suite (test_mcp_cage_v21.py)",
-            [sys.executable, str(PROTOTYPE_DIR / "test_mcp_cage_v21.py")],
+            "1. Core IFC Lattice, WAL Vault, SSRF/DNS & Config Auditor Suite (tests/unit/test_ifc_lattice_and_wal_vault.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_ifc_lattice_and_wal_vault.py")],
         ),
         (
-            "2. v0.3.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)",
-            [sys.executable, str(PROTOTYPE_DIR / "test_mcp_cage_v30_empirical_guards.py")],
+            "2. Empirical Wire Guards & Latency Regression Suite (tests/unit/test_empirical_guards.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_empirical_guards.py")],
         ),
         (
-            "3. v0.4.0 Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Suite (test_mcp_cage_v40_wiredifc_and_secbench.py)",
-            [sys.executable, str(PROTOTYPE_DIR / "test_mcp_cage_v40_wiredifc_and_secbench.py")],
+            "3. Wire-DIFC, 4-Slot Canonicalizer, Line-Span WAL & Kernel Sandbox Suite (tests/unit/test_wiredifc_canonicalizer_and_sandbox.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_wiredifc_canonicalizer_and_sandbox.py")],
         ),
         (
-            "4. 8-Plane End-to-End Security Suite (test_e2e_all_8_planes.py)",
-            [sys.executable, str(PROTOTYPE_DIR / "test_e2e_all_8_planes.py")],
+            "4. Modular Package & Declarative Enterprise Policy Suite (tests/unit/test_modular_package_and_policy.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_modular_package_and_policy.py")],
+        ),
+        (
+            "5. 25-Mechanism Empirical CWE Paired-Twin Matrix (tests/cwe_catalog/test_cwe_paired_twin_matrix.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "cwe_catalog" / "test_cwe_paired_twin_matrix.py")],
+        ),
+        (
+            "6. Agentic AI Frameworks & Stdlib Purity Non-Regression Suite (tests/cwe_catalog/test_agentic_ai_frameworks.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "cwe_catalog" / "test_agentic_ai_frameworks.py")],
+        ),
+        (
+            "7. Tier 1: 8-Plane End-to-End Security Suite (tests/e2e/test_tier1_all_8_planes.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "tests" / "e2e" / "test_tier1_all_8_planes.py")],
         ),
     ]
-    if shutil.which("npx") and (PROTOTYPE_DIR / "test_tier2_real_mcp_and_canary.py").exists():
+    tier2_script = PROTOTYPE_DIR / "tests" / "e2e" / "test_tier2_real_mcp_and_canary.py"
+    if shutil.which("npx") and tier2_script.exists():
         suites.append(
             (
-                "5. Tier 2 Official Node.js MCP + Live HTTP Canary Suite (test_tier2_real_mcp_and_canary.py)",
-                [sys.executable, str(PROTOTYPE_DIR / "test_tier2_real_mcp_and_canary.py")],
+                "8. Tier 2: Official Node.js MCP + Live HTTP Canary Suite (tests/e2e/test_tier2_real_mcp_and_canary.py)",
+                [sys.executable, str(tier2_script)],
             )
         )
-    suites.extend(
-        [
-            (
-                "6. Agentic AI Toolkits & Cross-Version Non-Regression Suite (test_agentic_ai_tools_and_non_regression.py)",
-                [sys.executable, str(PROTOTYPE_DIR / "test_agentic_ai_tools_and_non_regression.py")],
-            ),
-            (
-                "7. 25-Mechanism Empirical CWE Paired-Twin Matrix (test_cwe_empirical_catalog_matrix.py)",
-                [sys.executable, str(PROTOTYPE_DIR / "test_cwe_empirical_catalog_matrix.py")],
-            ),
-            (
-                "8. Modular Package & Declarative Enterprise Policy Suite (tests/unit/test_modular_package_and_policy.py)",
-                [sys.executable, str(PROTOTYPE_DIR / "tests" / "unit" / "test_modular_package_and_policy.py")],
-            ),
-            (
-                "9. 5-Act Interactive End-to-End Verification Demo (demo_interactive.py)",
-                [sys.executable, str(PROTOTYPE_DIR / "demo_interactive.py")],
-            ),
-        ]
+    suites.append(
+        (
+            "9. 5-Act Interactive End-to-End Verification Demo (examples/demo_interactive.py)",
+            [sys.executable, str(PROTOTYPE_DIR / "examples" / "demo_interactive.py")],
+        )
     )
     return suites
 

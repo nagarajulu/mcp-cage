@@ -21,7 +21,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mcp_cage_core import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from mcp_cage import (
     CausalStateProgressGovernor,
     DestinationBoundFPEVault,
     PersistentLineSpanProvenance,

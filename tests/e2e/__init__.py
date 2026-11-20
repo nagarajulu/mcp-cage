@@ -8,5 +8,5 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
-from test_e2e_all_8_planes import TestE2EAll8Planes  # noqa: F401, E402
-from test_tier2_real_mcp_and_canary import TestTier2RealMcpAndCanary  # noqa: F401, E402
+from tests.e2e.test_tier1_all_8_planes import TestPlane1CognitiveAndContextLayer  # noqa: F401, E402
+from tests.e2e.test_tier2_real_mcp_and_canary import TestTier2RealMcpAndCanary  # noqa: F401, E402

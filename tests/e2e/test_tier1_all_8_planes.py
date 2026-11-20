@@ -21,7 +21,10 @@ import threading
 import unittest
 from pathlib import Path
 
-from mcp_cage_core import (
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from mcp_cage import (
     BidirectionalSecretScrubber,
     Confidentiality,
     DeclassificationAction,
@@ -38,7 +41,7 @@ from mcp_cage_core import (
     filesystem_read_taint_resolver,
     github_issue_taint_resolver,
 )
-from mcp_cage_proxy import MCPJsonRpcProxy, StdioSubprocessBridge
+from mcp_cage.proxy import MCPJsonRpcProxy, StdioSubprocessBridge
 
 
 class TestPlane1CognitiveAndContextLayer(unittest.TestCase):
@@ -452,7 +455,7 @@ class TestPlane6to8SecretsRealSubprocessPipeAndActuation(unittest.TestCase):
             step_up_callback=lambda fq, args, ev: DeclassificationAction.DENY,
         )
 
-        mock_server_script = str(Path(__file__).parent / "mock_mcp_server.py")
+        mock_server_script = str(REPO_ROOT / "tests" / "fixtures" / "mock_mcp_server.py")
         with StdioSubprocessBridge([sys.executable, mock_server_script], proxy) as bridge:
             # 1. `tools/list` over real OS pipe
             r1 = bridge.send_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -689,7 +692,7 @@ class TestPlane9WireDIFCv040EndToEnd(unittest.TestCase):
         import subprocess
 
         sbpl_out = self.ws / "compiled_kernel.sb"
-        core_script = Path(__file__).resolve().parent / "mcp_cage_core.py"
+        core_script = REPO_ROOT / "mcp_cage" / "core.py"
         res_cli = subprocess.run(
             [
                 sys.executable,

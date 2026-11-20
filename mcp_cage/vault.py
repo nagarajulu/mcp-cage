@@ -5,7 +5,7 @@ Wire Payload Sanitizer, and Information-Theoretic Covert Channel Detectors.
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     AUTHORITY_LEXICON,
     BASE64_EXFIL_LABEL_RE,
     BidirectionalSecretScrubber,

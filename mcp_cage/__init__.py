@@ -20,7 +20,7 @@ Modular Package Structure:
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     AUTHORITY_LEXICON,
     BASE64_EXFIL_LABEL_RE,
     CANONICAL_UUID_RE,

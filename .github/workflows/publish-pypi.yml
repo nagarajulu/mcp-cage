@@ -1,6 +1,8 @@
 name: Publish to PyPI (OIDC Trusted Publisher + PEP 740 Attestations)
 
 on:
+  push:
+    branches: ["main"]
   release:
     types: [published]
   workflow_dispatch:
@@ -21,12 +23,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify Zero-Dependency Security & 9-Plane E2E Regression Suites
+      - name: Verify 7-Gate OPSEC Scanner & All Security Regression Suites
         run: |
-          python3 test_mcp_cage_v30_empirical_guards.py -v
-          python3 test_mcp_cage_v21.py -v
-          python3 test_e2e_all_8_planes.py -v
-          python3 test_agentic_ai_tools_and_non_regression.py -v
+          python3 .githooks/pre-commit
+          python3 tests/unit/test_ifc_lattice_and_wal_vault.py -v
+          python3 tests/unit/test_empirical_guards.py -v
+          python3 tests/unit/test_wiredifc_canonicalizer_and_sandbox.py -v
+          python3 tests/unit/test_modular_package_and_policy.py -v
+          python3 tests/cwe_catalog/test_cwe_paired_twin_matrix.py -v
+          python3 tests/cwe_catalog/test_agentic_ai_frameworks.py -v
+          python3 tests/e2e/test_tier1_all_8_planes.py -v
+          python3 examples/demo_interactive.py
 
       - name: Install build frontend
         run: python3 -m pip install --upgrade build
@@ -61,3 +68,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true
+          skip-existing: true

@@ -27,7 +27,9 @@ import threading
 from pathlib import Path
 from typing import Any, Mapping
 
-from mcp_cage_core import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from mcp_cage.core import (
     BidirectionalSecretScrubber,
     Confidentiality,
     DeclassificationAction,
@@ -42,7 +44,7 @@ from mcp_cage_core import (
     filesystem_read_taint_resolver,
     github_issue_taint_resolver,
 )
-from mcp_cage_proxy import MCPJsonRpcProxy
+from mcp_cage.proxy import MCPJsonRpcProxy
 
 
 def _multi_file_read_guard(workspace_root: Path):

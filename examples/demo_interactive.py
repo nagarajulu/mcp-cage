@@ -12,10 +12,13 @@ Verifies core security and usability guarantees:
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
-from mcp_cage_core import (
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from mcp_cage import (
     BidirectionalSecretScrubber,
     Confidentiality,
     DeclassificationAction,
@@ -30,7 +33,7 @@ from mcp_cage_core import (
     filesystem_read_taint_resolver,
     github_issue_taint_resolver,
 )
-from mcp_cage_proxy import MCPJsonRpcProxy
+from mcp_cage.proxy import MCPJsonRpcProxy
 
 
 def banner(title: str) -> None:

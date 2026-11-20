@@ -6,7 +6,7 @@ Graph Analyzer (`ToxicFlowGraphAnalyzer` / `mcp-sploit`).
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     DEFAULT_AUDIT_CATALOG,
     SchemaLockVerifier,
     ToxicFlowFinding,

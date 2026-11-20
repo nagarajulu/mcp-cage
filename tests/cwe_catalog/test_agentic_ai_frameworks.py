@@ -30,7 +30,10 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from mcp_cage_core import (
+PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROTOTYPE_DIR))
+
+from mcp_cage import (
     BidirectionalSecretScrubber,
     Confidentiality,
     Integrity,
@@ -41,9 +44,6 @@ from mcp_cage_core import (
     ToxicFlowGraphAnalyzer,
     is_covert_exfil_identifier,
 )
-
-
-PROTOTYPE_DIR = Path(__file__).resolve().parent
 
 
 class TestAgenticAiToolsAndNonRegression(unittest.TestCase):
@@ -285,8 +285,6 @@ class TestAgenticAiToolsAndNonRegression(unittest.TestCase):
 
         target_files = [
             PROTOTYPE_DIR / "mcp_cage_core.py",
-            PROTOTYPE_DIR / "mcp_cage_proxy.py",
-            PROTOTYPE_DIR / "mcp_cage_cli.py",
             *sorted((PROTOTYPE_DIR / "mcp_cage").glob("*.py")),
         ]
         for filepath in target_files:

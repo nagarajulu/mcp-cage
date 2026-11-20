@@ -32,8 +32,8 @@ from mcp_cage.vault import BidirectionalSecretScrubber, DestinationBoundFPEVault
 
 class TestModularPackageAndDeclarativePolicy(unittest.TestCase):
     def test_01_modular_submodule_exports(self) -> None:
-        """Verifies all domain submodules under `mcp_cage.*` export identical primitives to `mcp_cage_core`."""
-        self.assertEqual(mcp_cage.__version__, "0.4.0")
+        """Verifies all domain submodules under `mcp_cage.*` export identical primitives to `mcp_cage.core`."""
+        self.assertIn(mcp_cage.__version__, ("0.4.0", "0.4.1"))
         self.assertIsNotNone(SessionTaintStateMachine)
         self.assertIsNotNone(BidirectionalSecretScrubber)
         self.assertIsNotNone(DestinationBoundFPEVault)

@@ -19,9 +19,9 @@ import threading
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from mcp_cage_core import (
+from mcp_cage import (
     BidirectionalSecretScrubber,
     Confidentiality,
     GateDecisionType,
@@ -523,7 +523,7 @@ class TestMCPCageV21(unittest.TestCase):
         self.assertTrue(r5["continue"])
 
         # 6. Subprocess CLI test for `status`, `audit`, `reset`
-        core_script = Path(__file__).resolve().parent / "mcp_cage_core.py"
+        core_script = Path(__file__).resolve().parent.parent.parent / "mcp_cage" / "core.py"
         status_proc = subprocess.run(
             [sys.executable, str(core_script), "status", "--db", str(self.db_path), "--session", session_id],
             capture_output=True,
@@ -681,7 +681,7 @@ class TestMCPCageV21(unittest.TestCase):
         # 4. CLI `audit-config` exits with code 1 when CRITICAL findings exist
         cfg_file = self.tmp_path / ".mcp.json"
         cfg_file.write_text(json.dumps(poisoned_config, indent=2))
-        core_script = Path(__file__).resolve().parent / "mcp_cage_core.py"
+        core_script = Path(__file__).resolve().parent.parent.parent / "mcp_cage" / "core.py"
         proc = subprocess.run(
             [sys.executable, str(core_script), "audit-config", str(cfg_file)],
             capture_output=True,

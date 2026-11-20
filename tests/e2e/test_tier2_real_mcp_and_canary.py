@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 
-PROTOTYPE_DIR = Path(__file__).resolve().parent
-CLI_SCRIPT = PROTOTYPE_DIR / "mcp_cage_cli.py"
-MOCK_SERVER_SCRIPT = PROTOTYPE_DIR / "mock_mcp_server.py"
+PROTOTYPE_DIR = Path(__file__).resolve().parent.parent.parent
+CLI_SCRIPT = PROTOTYPE_DIR / "mcp_cage" / "cli_runner.py"
+MOCK_SERVER_SCRIPT = PROTOTYPE_DIR / "tests" / "fixtures" / "mock_mcp_server.py"
 
 
 class CanaryExfiltrationListener:

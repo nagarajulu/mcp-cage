@@ -6,7 +6,7 @@ Entropy Validation (`validate_outbound_network_target`).
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     CLOUD_METADATA_HOSTS,
     DANGEROUS_URI_SCHEMES,
     DNS_CMD_HOST_RE,

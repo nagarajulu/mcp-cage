@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     BidirectionalSecretScrubber,
     CausalStateProgressGovernor,
     Confidentiality,

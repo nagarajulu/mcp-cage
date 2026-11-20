@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     BidirectionalSecretScrubber,
     EnforcementMode,
     MCPCageEngine,

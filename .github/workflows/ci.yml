@@ -24,29 +24,29 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run 6-Gate OPSEC, Embargo & Zero-Leak Pre-Commit Scanner (.githooks/pre-commit)
+      - name: Run 7-Gate OPSEC, Embargo & Zero-Leak Pre-Commit Scanner (.githooks/pre-commit)
         run: python3 .githooks/pre-commit
 
-      - name: Run v0.3.0 Empirical Guards Regression Suite (test_mcp_cage_v30_empirical_guards.py)
-        run: python3 test_mcp_cage_v30_empirical_guards.py -v
+      - name: Run Core IFC Lattice, WAL Vault, SSRF/DNS & Config Auditor Suite
+        run: python3 tests/unit/test_ifc_lattice_and_wal_vault.py -v
 
-      - name: Run v0.4.0 Wire-DIFC, 4-Slot Canonicalizer & Kernel Sandbox Suite (test_mcp_cage_v40_wiredifc_and_secbench.py)
-        run: python3 test_mcp_cage_v40_wiredifc_and_secbench.py -v
+      - name: Run Empirical Guards & Latency Regression Suite
+        run: python3 tests/unit/test_empirical_guards.py -v
 
-      - name: Run V2.2 Unit & Dual-Plane Security Suite (test_mcp_cage_v21.py)
-        run: python3 test_mcp_cage_v21.py -v
+      - name: Run Wire-DIFC, 4-Slot Canonicalizer & Kernel Sandbox Suite
+        run: python3 tests/unit/test_wiredifc_canonicalizer_and_sandbox.py -v
 
-      - name: Run 8-Plane End-to-End Security Suite (test_e2e_all_8_planes.py)
-        run: python3 test_e2e_all_8_planes.py -v
-
-      - name: Run Agentic AI Toolkits & Cross-Version Non-Regression Suite (test_agentic_ai_tools_and_non_regression.py)
-        run: python3 test_agentic_ai_tools_and_non_regression.py -v
-
-      - name: Run 25-Mechanism Empirical CWE Paired-Twin Matrix (test_cwe_empirical_catalog_matrix.py)
-        run: python3 test_cwe_empirical_catalog_matrix.py -v
-
-      - name: Run Modular Package & Declarative Enterprise Policy Suite (tests/unit/test_modular_package_and_policy.py)
+      - name: Run Modular Package & Declarative Enterprise Policy Suite
         run: python3 tests/unit/test_modular_package_and_policy.py -v
 
-      - name: Run Interactive 5-Act Verification Demo (demo_interactive.py)
-        run: python3 demo_interactive.py
+      - name: Run 25-Mechanism Empirical CWE Paired-Twin Matrix
+        run: python3 tests/cwe_catalog/test_cwe_paired_twin_matrix.py -v
+
+      - name: Run Agentic AI Frameworks & Stdlib Purity Non-Regression Suite
+        run: python3 tests/cwe_catalog/test_agentic_ai_frameworks.py -v
+
+      - name: Run Tier 1 8-Plane End-to-End Security Suite
+        run: python3 tests/e2e/test_tier1_all_8_planes.py -v
+
+      - name: Run Interactive 5-Act Verification Demo
+        run: python3 examples/demo_interactive.py

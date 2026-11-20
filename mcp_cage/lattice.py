@@ -5,7 +5,7 @@ Line-Span Provenance Tracker, and Causal Progress Governor.
 
 from __future__ import annotations
 
-from mcp_cage_core import (
+from mcp_cage.core import (
     CausalStateProgressGovernor,
     Confidentiality,
     DeclassificationAction,

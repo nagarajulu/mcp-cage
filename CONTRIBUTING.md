@@ -12,25 +12,26 @@ Thank you for contributing to **`mcp-cage`** — the Zero-Dependency Dual-Plane 
 mcp-cage/
 ├── mcp_cage/                                     # Structured Modular Python Package
 │   ├── __init__.py                               # Public API exports
+│   ├── core.py                                   # Core zero-dependency Wire-DIFC reference monitor engine
 │   ├── lattice.py                                # Dual-Axis Taint Lattice, SQLite WAL State Machine, Line-Span Provenance
 │   ├── vault.py                                  # Bidirectional Secret Scrubber, FPE Vault, Covert Entropy Detectors
 │   ├── schema.py                                 # 4-Slot Canonicalizer, SchemaLockVerifier, ToxicFlowGraphAnalyzer
 │   ├── guards.py                                 # Empirical CWE Parameter Guards (StandardArgGuards, SSRF, Workspace Jail)
 │   ├── surfaces.py                               # Plane A (MCPWireGateway), Plane B (handle_cli_hook), Kernel Sandbox Compiler
 │   ├── policy.py                                 # Declarative Enterprise Policy Loader (.mcp-cage/policy.json)
+│   ├── proxy.py                                  # Subprocess stdio JSON-RPC proxy wrapper
+│   ├── cli_runner.py                             # Standalone CLI wrapper & config generator
 │   └── cli.py                                    # Unified mcp-cage & mcp-sploit CLI entrypoint
-│
-├── mcp_cage_core.py                              # Zero-dependency single-file engine & PyPI entrypoint
-├── mcp_cage_proxy.py                             # Subprocess stdio JSON-RPC proxy wrapper
-├── mcp_cage_cli.py                               # Standalone CLI dispatcher
 │
 ├── tests/                                        # Structured Verification & Regression Hierarchy
 │   ├── unit/                                     # Unit tests for IFC lattice, WAL vault, canonicalizer & kernel sandbox
 │   ├── cwe_catalog/                              # 25-Mechanism Empirical CWE Paired-Twin Matrix & Agentic Framework tests
-│   └── e2e/                                      # Tier 1 (8-Plane E2E) & Tier 2 (Real Node.js MCP + Live HTTP Canary)
+│   ├── e2e/                                      # Tier 1 (8-Plane E2E) & Tier 2 (Real Node.js MCP + Live HTTP Canary)
+│   └── fixtures/                                 # Deterministic mock MCP server for offline E2E tests
 │
-├── test_*.py                                     # Root test runners (executed by run_all_regression_suites.py & CI)
-├── run_all_regression_suites.py                  # Unified 9-suite test & OPSEC verification runner
+├── examples/
+│   └── demo_interactive.py                       # 5-Act Interactive Verification Demo
+├── run_all_regression_suites.py                  # Unified 10-suite test & OPSEC verification runner
 ├── .githooks/pre-commit                          # Automated 7-Gate OPSEC, Embargo, Personal-Path & Docs-Sync scanner
 └── docs/index.html & visualizer.html             # Interactive browser simulator & GitHub Pages showcase
 ```
@@ -39,7 +40,7 @@ mcp-cage/
 
 ## 2. The Paired-Twin CWE Promotion Contract (Mandatory for New Guards)
 
-Whenever a new vulnerability class or bypass mechanism is discovered in an MCP server or AI agent toolkit, it **must** be added to [`test_cwe_empirical_catalog_matrix.py`](test_cwe_empirical_catalog_matrix.py) as an `EmpiricalCWETwinSpec` entry:
+Whenever a new vulnerability class or bypass mechanism is discovered in an MCP server or AI agent toolkit, it **must** be added to [`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`](tests/cwe_catalog/test_cwe_paired_twin_matrix.py) as an `EmpiricalCWETwinSpec` entry:
 
 ```python
 EmpiricalCWETwinSpec(
@@ -60,7 +61,7 @@ EmpiricalCWETwinSpec(
 ### Why Every Guard Requires a Paired Twin:
 1. **Attack Twin (`attack_payloads`):** Asserts `fwd is None`, `imm["result"]["isError"] is True`, and verifies that the block reason contains one of `expected_block_substrings` (preventing **False-Negative Regressions**).
 2. **Benign Twin (`benign_payloads`):** Passes a closely shaped legitimate payload to the same tool and parameter and asserts `fwd is not None and imm is None` (preventing **False-Positive Drift**).
-3. **Cross-Surface Parity:** [`test_cwe_empirical_catalog_matrix.py`](test_cwe_empirical_catalog_matrix.py) automatically tests your `EmpiricalCWETwinSpec` across **both** Plane A (`MCPWireGateway`) and Plane B (`handle_cli_hook`).
+3. **Cross-Surface Parity:** [`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`](tests/cwe_catalog/test_cwe_paired_twin_matrix.py) automatically tests your `EmpiricalCWETwinSpec` across **both** Plane A (`MCPWireGateway`) and Plane B (`handle_cli_hook`).
 
 ---
 

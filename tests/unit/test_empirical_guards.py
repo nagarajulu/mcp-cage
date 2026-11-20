@@ -19,9 +19,9 @@ import time
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from mcp_cage_core import (
+from mcp_cage import (
     BidirectionalSecretScrubber,
     MCPCageEngine,
     SchemaLockVerifier,
@@ -93,7 +93,7 @@ class TestMCPCageV30EmpiricalGuards(unittest.TestCase):
         )
 
     def test_version_is_current(self) -> None:
-        self.assertIn(__version__, ("0.3.0", "0.4.0"))
+        self.assertIn(__version__, ("0.3.0", "0.4.0", "0.4.1"))
 
     # -------------------------------------------------------------------------
     # 1. Runtime Endpoint & Session Re-pointing (`GHSA-rvjm-7hvp-f868`)
@@ -337,7 +337,7 @@ class TestMCPCageV30EmpiricalGuards(unittest.TestCase):
         self.assertLess(mean_ms, 1.0, f"Expected sub-millisecond mean latency, got {mean_ms:.3f} ms")
 
 
-from test_mcp_cage_v40_wiredifc_and_secbench import TestMCPCageV40WireDIFC  # noqa: F401, E402
+from tests.unit.test_wiredifc_canonicalizer_and_sandbox import TestMCPCageV40WireDIFC  # noqa: F401, E402
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
