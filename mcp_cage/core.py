@@ -826,11 +826,58 @@ class StandardArgGuards:
     ) -> Callable[[Mapping[str, Any]], tuple[bool, str]]:
         return make_workspace_path_guard(workspace_root, is_write=is_write)
 
+    FREE_TEXT_PAYLOAD_KEYS = frozenset(
+        {
+            "content",
+            "body",
+            "text",
+            "replacement",
+            "diff",
+            "patch",
+            "markdown",
+            "html",
+            "message",
+            "description",
+            "code",
+            "python_code",
+            "script",
+            "prompt",
+            "notes",
+            "note",
+            "comment",
+            "summary",
+        }
+    )
+    SLASHED_NAMESPACE_KEYS = frozenset(
+        {
+            "repo_name",
+            "reponame",
+            "repository_name",
+            "repositoryname",
+            "model_name",
+            "modelname",
+            "dataset_name",
+            "datasetname",
+            "branch_name",
+            "branchname",
+            "ref_name",
+            "refname",
+            "tag_name",
+            "tagname",
+            "image_name",
+            "imagename",
+            "package_name",
+            "packagename",
+        }
+    )
+
     @classmethod
     def path_command_substitution_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
-        """Blocks embedded POSIX command substitution (`$(...)`, backticks, `${...}`) in path/command args and `$(...)` in any tool arg."""
+        """Blocks embedded POSIX command substitution (`$(...)`, backticks, `${...}`) in path/command args and `$(...)` in non-free-text tool args."""
         for k, v in cls._iter_kv_pairs(args):
-            is_path_or_cmd = cls._is_path_key(k) or k.lower() in {"argv", "binary", "cmd", "command", "executable"}
+            low_k = k.lower()
+            is_path_or_cmd = cls._is_path_key(k) or low_k in {"argv", "binary", "cmd", "command", "executable"}
+            is_free_text = low_k in cls.FREE_TEXT_PAYLOAD_KEYS
             values = v if isinstance(v, (list, tuple)) else [v]
             for item in values:
                 if not isinstance(item, str):
@@ -840,7 +887,7 @@ class StandardArgGuards:
                         False,
                         f"Embedded POSIX command substitution / shell expansion blocked in parameter '{k}' (CWE-78): '{item}'.",
                     )
-                if "$(" in item and cls.INLINE_CMD_SUBST_RE.search(item):
+                if not is_free_text and "$(" in item and cls.INLINE_CMD_SUBST_RE.search(item):
                     return (
                         False,
                         f"Embedded POSIX command substitution `$(...)` blocked in parameter '{k}' (CWE-78): '{item}'.",
@@ -918,7 +965,7 @@ class StandardArgGuards:
                 if isinstance(val, str) and val.strip() and not cls.SQL_IDENTIFIER_RE.match(val.strip()):
                     return False, f"Unsafe SQL identifier in '{key}' blocked (CWE-89): '{val[:80]}'."
                 continue
-            if low_k in {"statement", "sql", "sql_query", "query", "where_clause", "order_by", "filter", "having", "sort_by", "group_by"}:
+            if low_k in {"statement", "sql", "sql_query", "query", "where_clause", "order_by", "filter", "having", "sort_by", "group_by"} | cls.FREE_TEXT_PAYLOAD_KEYS:
                 continue
             if not isinstance(val, str) or not val.strip():
                 continue
@@ -946,7 +993,7 @@ class StandardArgGuards:
         for key, val in cls._iter_kv_pairs(args):
             low_key = key.lower()
             is_id = cls._is_resource_id_key(key)
-            is_rel_repo_path = low_key in {"artifact_path", "file_path", "relative_path", "fullname", "target"}
+            is_rel_repo_path = low_key in {"artifact_path", "file_path", "relative_path", "fullname", "target"} | cls.SLASHED_NAMESPACE_KEYS
             if not is_id and not is_rel_repo_path:
                 continue
             values = val if isinstance(val, (list, tuple)) else [val]
@@ -957,6 +1004,13 @@ class StandardArgGuards:
                     continue
                 decoded_fixed = iterative_fixed_point_unquote(item, max_depth=5)
                 for candidate in (item, decoded_fixed):
+                    if low_key in cls.SLASHED_NAMESPACE_KEYS:
+                        if cls.REST_RELATIVE_PATH_UNSAFE_RE.search(candidate) or "?" in candidate or "#" in candidate:
+                            return (
+                                False,
+                                f"URL path-segment traversal / delimiter blocked in '{key}' (CWE-22): '{item}'.",
+                            )
+                        continue
                     if is_id and cls.URL_PATH_TRAVERSAL_RE.search(candidate):
                         return (
                             False,
@@ -1087,6 +1141,18 @@ class StandardArgGuards:
     )
     CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     XSS_INJECTION_RE = re.compile(r"(?i)(?:<\s*(?:script|img|svg|iframe|object|embed|body)\b|on(?:error|load|click|mouseover)\s*=|javascript:)")
+    XXE_ENTITY_RE = re.compile(r"(?i)<!(?:ENTITY\b|DOCTYPE\b[^>]+\b(?:SYSTEM|PUBLIC)\b)")
+    SSTI_DUNDER_OR_EXEC_RE = re.compile(
+        r"(?i)(?:\{\{[^}]*(?:__class__|__mro__|__subclasses__|__globals__|__builtins__|__import__|__init__|config\.items\s*\(|cycler\.|joiner\.|namespace\.|lipsum\.)[^}]*\}\}|\{%[^%]*(?:\bimport\s+['\"](?:os|subprocess|sys|builtins)['\"]|\binclude\s+['\"](?:/|\.\./))[^%]*%\})"
+    )
+    NOSQL_EXEC_OPERATORS = frozenset({"$where", "$function", "$accumulator"})
+    UNSAFE_DESERIALIZATION_TAG_RE = re.compile(
+        r"(?i)(?:!!(?:python/(?:object|name|module)|javax\.|com\.sun\.|org\.springframework\.)|['\"]py/(?:object|reduce|function|newobj)['\"]\s*:)"
+    )
+    GRAPHQL_MUTATION_RE = re.compile(r"(?i)^\s*(?:mutation\b|subscription\b)")
+    GIT_EXT_OR_CONFIG_RCE_RE = re.compile(
+        r"(?i)(?:^\s*(?:git::)?(?:ext|fd)::|\b(?:core\.(?:sshcommand|fsmonitor|gitproxy|editor|pager)|protocol\.ext\.allow|credential\.helper)\s*=)"
+    )
 
     @classmethod
     def cypher_identifier_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
@@ -1112,6 +1178,103 @@ class StandardArgGuards:
                     False,
                     f"Reflected HTML/XSS payload blocked in OAuth parameter '{key}' (CWE-79): '{val[:80]}'.",
                 )
+        return True, "OK"
+
+    @classmethod
+    def xxe_and_entity_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks XML External Entity (`<!ENTITY`, `<!DOCTYPE ... SYSTEM/PUBLIC`) declarations in XML/SVG tool inputs (CWE-611)."""
+        for key, val in cls._iter_kv_pairs(args):
+            if isinstance(val, str) and "<!" in val and cls.XXE_ENTITY_RE.search(val):
+                return (
+                    False,
+                    f"XML External Entity (XXE / DOCTYPE SYSTEM) declaration blocked in '{key}' (CWE-611).",
+                )
+        return True, "OK"
+
+    @classmethod
+    def ssti_template_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks Server-Side Template Injection (Jinja2/Mako/Twig dunder & import/include gadgets) in template parameters (CWE-1336)."""
+        for key, val in cls._iter_kv_pairs(args):
+            if isinstance(val, str) and ("{{" in val or "{%" in val) and cls.SSTI_DUNDER_OR_EXEC_RE.search(val):
+                return (
+                    False,
+                    f"Server-Side Template Injection (SSTI dunder/exec gadget) blocked in '{key}' (CWE-1336): '{val[:80]}'.",
+                )
+        return True, "OK"
+
+    @classmethod
+    def nosql_operator_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks MongoDB/NoSQL server-side JS execution operators (`$where`, `$function`, `$accumulator`) and sensitive `$regex` oracles (CWE-943)."""
+        def _scan_nosql(obj: Any, parent_field: str = "") -> tuple[bool, str]:
+            if isinstance(obj, Mapping):
+                for k, v in obj.items():
+                    k_str = str(k).strip()
+                    k_low = k_str.lower()
+                    if k_low in cls.NOSQL_EXEC_OPERATORS:
+                        return (
+                            False,
+                            f"NoSQL server-side JavaScript operator '{k_str}' blocked (CWE-943).",
+                        )
+                    if k_low in {"$regex", "$ne", "$gt", "$gte"} and parent_field.lower() in cls.SENSITIVE_QUERY_FILTER_FIELDS:
+                        return (
+                            False,
+                            f"NoSQL operator '{k_str}' on sensitive credential field '{parent_field}' blocked (CWE-943/CWE-200).",
+                        )
+                    ok, reason = _scan_nosql(v, parent_field=k_str if not k_str.startswith("$") else parent_field)
+                    if not ok:
+                        return False, reason
+            elif isinstance(obj, (list, tuple)):
+                for item in obj:
+                    ok, reason = _scan_nosql(item, parent_field=parent_field)
+                    if not ok:
+                        return False, reason
+            return True, "OK"
+
+        return _scan_nosql(args)
+
+    @classmethod
+    def unsafe_deserialization_tag_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks PyYAML (`!!python/object/apply`) and `jsonpickle` (`py/object`, `py/reduce`) deserialization gadgets (CWE-502)."""
+        def _scan_obj(obj: Any, key_name: str = "") -> tuple[bool, str]:
+            if isinstance(obj, str):
+                if cls.UNSAFE_DESERIALIZATION_TAG_RE.search(obj):
+                    return (
+                        False,
+                        f"Unsafe YAML/jsonpickle object deserialization tag blocked in '{key_name}' (CWE-502).",
+                    )
+            elif isinstance(obj, Mapping):
+                for k, v in obj.items():
+                    k_str = str(k)
+                    if k_str.lower() in {"py/object", "py/reduce", "py/function", "py/newobj"}:
+                        return (
+                            False,
+                            f"Unsafe jsonpickle deserialization key '{k_str}' blocked (CWE-502).",
+                        )
+                    ok, reason = _scan_obj(v, key_name=k_str)
+                    if not ok:
+                        return False, reason
+            elif isinstance(obj, (list, tuple)):
+                for item in obj:
+                    ok, reason = _scan_obj(item, key_name=key_name)
+                    if not ok:
+                        return False, reason
+            return True, "OK"
+
+        return _scan_obj(args)
+
+    @classmethod
+    def git_transport_and_config_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks `git::ext::` / `fd::` remote helper transport RCE and `core.sshCommand` / `core.fsmonitor` config injection (CWE-88/CWE-78)."""
+        for key, val in cls._iter_kv_pairs(args):
+            if key.lower() in cls.FREE_TEXT_PAYLOAD_KEYS:
+                continue
+            values = val if isinstance(val, (list, tuple)) else [val]
+            for item in values:
+                if isinstance(item, str) and item and cls.GIT_EXT_OR_CONFIG_RCE_RE.search(item):
+                    return (
+                        False,
+                        f"Unsafe Git ext:: transport or core.sshCommand/fsmonitor config override blocked in '{key}' (CWE-88/CWE-78): '{item[:80]}'.",
+                    )
         return True, "OK"
 
     @classmethod
@@ -2271,8 +2434,12 @@ class ToxicFlowGraphAnalyzer:
         is_mutator = ToolRole.PRIVILEGED_MUTATOR in roles
         low_tool = tool_name.lower()
 
-        # Universal zero-config v0.3.0 wire-level parameter guards
+        # Universal zero-config v0.3.0 / v0.4.x wire-level parameter guards
         guards: list[Callable[[Mapping[str, Any]], tuple[bool, str]]] = [
+            StandardArgGuards.xxe_and_entity_guard,
+            StandardArgGuards.ssti_template_guard,
+            StandardArgGuards.nosql_operator_guard,
+            StandardArgGuards.unsafe_deserialization_tag_guard,
             StandardArgGuards.make_endpoint_repoint_guard(
                 tool_name=tool_name,
                 allow_repoint=allow_endpoint_repoint,
@@ -2280,6 +2447,7 @@ class ToxicFlowGraphAnalyzer:
             ),
             StandardArgGuards.path_command_substitution_guard,
             StandardArgGuards.cli_flag_injection_guard,
+            StandardArgGuards.git_transport_and_config_guard,
             StandardArgGuards.mqtt_topic_wildcard_guard,
             StandardArgGuards.cypher_identifier_guard,
             StandardArgGuards.oauth_xss_guard,
@@ -2289,6 +2457,18 @@ class ToxicFlowGraphAnalyzer:
             StandardArgGuards.code_sandbox_escape_guard,
             StandardArgGuards.make_attachment_path_guard(workspace_root),
         ]
+        if "graphql" in low_tool and any(tok in low_tool for tok in ("query", "read", "search", "get", "fetch")):
+            def _graphql_readonly_guard(args: Mapping[str, Any]) -> tuple[bool, str]:
+                for k, v in StandardArgGuards._iter_kv_pairs(args):
+                    if k.lower() in {"query", "graphql", "gql", "document"} and isinstance(v, str):
+                        if StandardArgGuards.GRAPHQL_MUTATION_RE.search(v):
+                            return (
+                                False,
+                                f"GraphQL mutation/subscription smuggled inside read-only query tool '{tool_name}' blocked (CWE-863).",
+                            )
+                return True, "OK"
+
+            guards.append(_graphql_readonly_guard)
         if StandardArgGuards.REST_RELATIVE_PATH_TOOL_RE.search(low_tool):
             guards.append(StandardArgGuards.rest_relative_path_guard)
         if low_tool in {
@@ -3727,6 +3907,9 @@ SENSITIVE_BAIT_LEXICON: frozenset[str] = frozenset({
 })
 
 CANONICAL_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+CANONICAL_HEX_DIGEST_RE = re.compile(r"^[0-9a-fA-F]{32,64}$")
+CANONICAL_ULID_RE = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
+CANONICAL_PREFIXED_API_ID_RE = re.compile(r"^[a-z]{2,12}_[A-Za-z0-9]{14,36}$")
 
 
 def bigram_transition_plausibility(s: str) -> float:
@@ -3792,7 +3975,13 @@ def is_covert_exfil_identifier(param_name: str, val: str, h0_threshold: float = 
         hyphen_words = [w for w in val.split("-") if w.isalpha() and len(w) >= 3]
         if len(non_hex_alpha) >= 3 and len(hyphen_words) >= 4 and bigram_transition_plausibility(val) >= 0.22:
             return True, f"[DICEWARE-IN-IDENTIFIER BLOCKED] Natural-language word sequence in '{param_name}'"
-        if CANONICAL_UUID_RE.fullmatch(val.strip()):
+        stripped_val = val.strip()
+        if (
+            CANONICAL_UUID_RE.fullmatch(stripped_val)
+            or CANONICAL_HEX_DIGEST_RE.fullmatch(stripped_val)
+            or CANONICAL_ULID_RE.fullmatch(stripped_val)
+            or CANONICAL_PREFIXED_API_ID_RE.fullmatch(stripped_val)
+        ):
             return False, "OK"
         if " " not in val and len(val) >= 24:
             h_val = shannon_entropy(val)

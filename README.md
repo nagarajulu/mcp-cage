@@ -228,19 +228,43 @@ Wrap any upstream MCP server with `mcp-cage wrap`:
 
 ---
 
-## Foundational Security & Information-Flow Control References
+## Foundational Security, Academic Research & Standard Taxonomies (`OWASP` / `MITRE ATLAS` / `CWE`)
 
-`mcp-cage` builds on established Operating Systems & Agentic Information-Flow Control (IFC) research:
+`mcp-cage` translates peer-reviewed Operating Systems & Agentic Information-Flow Control (IFC) research into deterministic, sub-millisecond (`<1ms`) wire and hook primitives:
 
-| Published System / Paper | Reference | Core Concept Adapted in `mcp-cage` |
+### 1. Peer-Reviewed Academic Research & Industry Advisories
+
+| Published System / Paper / Advisory | Reference | Core Mechanism Implemented in `mcp-cage` |
 | :--- | :--- | :--- |
-| **CaMeL** *(Debenedetti et al., Google DeepMind, 2025)* | [`arXiv:2503.18813`](https://arxiv.org/abs/2503.18813) | Separating data capabilities & provenance from untrusted control flow in LLM tool invocations. |
-| **FIDES** *(Costa et al., Microsoft Research, 2025)* | [`arXiv:2505.23643`](https://arxiv.org/abs/2505.23643) | Dual-lattice Information-Flow Control (Integrity $\times$ Confidentiality labels) with deterministic sink gates. |
-| **Progent** *(Shi et al., UC Berkeley, 2025)* | [`arXiv:2504.11703`](https://arxiv.org/abs/2504.11703) | Programmable privilege control & deterministic argument guards (`StandardArgGuards`) over tool parameters. |
-| **MELON** *(Zhu et al., 2025)* | [`arXiv:2502.05174`](https://arxiv.org/abs/2502.05174) | Provenance attribution blocking target arguments (URLs, domains, emails) extracted from untrusted tool outputs. |
-| **Spotlighting** *(Hines et al., Microsoft, 2024)* | [`arXiv:2403.14720`](https://arxiv.org/abs/2403.14720) | Cryptographically randomized datamarking boundaries (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) with anti-spoofing. |
-| **MCPTox** *(Wang et al., 2025)* | [`arXiv:2508.14925`](https://arxiv.org/abs/2508.14925) | Structural sanitization of poisoned MCP tool descriptions and cross-server shadowing detection (`SchemaLockVerifier`). |
-| **HiStar / Flume / Capsicum** *(Zeldovich et al., Krohn et al., Watson et al.)* | *OSDI '06 / SOSP '07 / USENIX '10* | Decentralized IFC labels, explicit human declassification leases, and OS-level capability confinement. |
+| **CaMeL** *(Debenedetti et al., Google DeepMind, 2025)* | [`arXiv:2503.18813`](https://arxiv.org/abs/2503.18813) | Separating data capabilities & provenance from untrusted LLM control flow via out-of-process reference monitoring (`MCPWireGateway` + `handle_cli_hook`). |
+| **FIDES** *(Costa et al., Microsoft Research, 2025)* | [`arXiv:2505.23643`](https://arxiv.org/abs/2505.23643) | Dual-lattice Information-Flow Control ($\mathcal{I} \times \mathcal{C}$ Integrity $\times$ Confidentiality labels) with deterministic sink gates in [`SessionTaintStateMachine`](mcp_cage/lattice.py). |
+| **Progent** *(Shi et al., UC Berkeley, 2025)* | [`arXiv:2504.11703`](https://arxiv.org/abs/2504.11703) | Programmable privilege control, deterministic argument guards ([`StandardArgGuards`](mcp_cage/guards.py)), and Declarative-to-Executable AST capability drift detection (`SKILL_AST_CAPABILITY_DRIFT`). |
+| **MELON** *(Zhu et al., 2025)* | [`arXiv:2502.05174`](https://arxiv.org/abs/2502.05174) | Provenance attribution extracting URLs, domains, and emails from untrusted tool outputs and blocking sink calls targeting them (`extract_untrusted_sink_entities`). |
+| **Spotlighting** *(Hines et al., Microsoft, 2024)* | [`arXiv:2403.14720`](https://arxiv.org/abs/2403.14720) | Cryptographically randomized datamarking boundaries (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) with anti-spoofing sanitization ([`WirePayloadSanitizer`](mcp_cage/vault.py)). |
+| **MCPTox** *(Wang et al., 2025)* | [`arXiv:2508.14925`](https://arxiv.org/abs/2508.14925) | Unconditional 4-Slot Schema Canonicalizer ([`WireDIFCCanonicalizer`](mcp_cage/schema.py)), authority log-odds scoring ($S_{\text{poison}} \ge 0.45$), and SHA-256 `mcp-lock.json` pinning. |
+| **Trojan Source & Rules File Backdoor** *(Boucher et al., Cambridge / Pillar Security, 2025)* | `CVE-2021-42574` / `CVE-2025-53773` | Static + wire stripping of invisible Unicode Tag (`U+E0000..U+E007F`), zero-width, and BiDi override codepoints in [`WorkspaceSkillAndRuleAuditor`](mcp_cage/surfaces.py) (`mcp-cage audit-skills`). |
+| **CurXecute / MCPoison & Copilot YOLO** *(2025 CVEs)* | `CVE-2025-54135` / `CVE-2025-53110` | Pre-execution config auditing ([`WorkspaceMCPConfigAuditor`](mcp_cage/surfaces.py) / `mcp-cage audit-config`) + runtime dotfile/hook write locks (`PROTECTED_DOTFILE_WRITE_PATTERNS`). |
+| **HiStar / Flume / Capsicum** *(Zeldovich et al., Krohn et al., Watson et al.)* | *OSDI '06 / SOSP '07 / USENIX '10* | Decentralized IFC labels, explicit human declassification leases (`LEASE_MUTATOR_5M`), and OS-kernel sandbox compilation ([`SchemaToKernelSandboxCompiler`](mcp_cage/surfaces.py)). |
+
+### 2. OWASP Top 10 for LLM & Agentic Applications + MITRE ATLAS Coverage Matrix
+
+| Standard Taxonomy ID | Threat Category | `mcp-cage` Enforcement Primitive & Verification Suite |
+| :--- | :--- | :--- |
+| **OWASP `LLM01` / MITRE `AML.T0051`** | Direct & Indirect Prompt Injection (`XPIA`) | Dual-Lattice IFC (`SessionTaintStateMachine`), Spotlighting boundaries, Content-Addressed Line-Span WAL Provenance (`PersistentLineSpanProvenance`), and `mcp-cage audit-skills`. |
+| **OWASP `LLM02` / MITRE `AML.T0048`** | Sensitive Information & Credential Disclosure | `BidirectionalSecretScrubber`, `DestinationBoundFPEVault`, Two-Axis Covert Hex DNS / EFF Diceware Identifier Detector (`is_covert_exfil_identifier`), and blind filter-oracle guards (`CWE-200`). |
+| **OWASP `LLM03` / MITRE `AML.T0010`** | AI Supply Chain, MCP Config & Skill Poisoning | `SchemaLockVerifier` (`mcp-lock.json` rug-pull detection), `WireDIFCCanonicalizer`, `WorkspaceMCPConfigAuditor` (`audit-config`), `WorkspaceSkillAndRuleAuditor` (`audit-skills`), and PEP 508 `package_install_guard`. |
+| **OWASP `LLM05` / `LLM06`** | Improper Output Handling & Excessive Agency | 34-Mechanism Empirical CWE Parameter Guards (`StandardArgGuards`), Meta-Tool Inner Dispatch Guard (`tool_execute`), Tenant Organization Allowlist Guard (`CWE-863`), and OS Kernel Sandbox Compiler (`compile-sandbox`). |
+| **OWASP `LLM08` / `LLM10`** | Persistent Memory Poisoning & Unbounded Consumption | Line-Span WAL Provenance on `CLAUDE.md`/`.cursorrules`/`MEMORY.md` (`PersistentLineSpanProvenance`) + Causal State-Progress Entropy Governor (`CausalStateProgressGovernor` defeating `OverServe` $93.88\times$ loops). |
+
+### 3. Complete 34-Mechanism Empirical CWE & CVE Protection Catalog
+
+Every vulnerability mechanism below is continuously verified via paired `[ATTACK_BLOCKED]` + `[BENIGN_ALLOWED]` twins across **both** Plane A (`MCPWireGateway`) and Plane B (`handle_cli_hook`) in [`tests/cwe_catalog/test_cwe_paired_twin_matrix.py`](tests/cwe_catalog/test_cwe_paired_twin_matrix.py):
+
+- **Path Traversal, Workspace Escape & REST Identifier Smuggling (`CWE-22`):** Sibling-prefix escape (`/workspace-evil`), split `(directory, filename)` join traversal, double-URL-encoded dot-segments (`%252e%252e`), nested `path_params`/`path` dictionary traversal, relative REST path & scheme smuggling (`../../oauth2/userinfo`), repository/artifact/node config path smuggling, and optional log-file path reads (`secops_read_web_log`).
+- **OS Command, POSIX Subshell & Git Transport/Flag Injection (`CWE-78` / `CWE-88`):** Embedded POSIX command substitution (`app$(id)`, backticks, `${IFS}`) in path/command arguments (with zero false positives on free-text file `content`/`body`), positional CLI flag injection (`--kubeconfig=`, `--upload-pack=`, `--output=`, `-oProxyCommand=`), `git::ext::` / `fd::` transport RCE, `core.sshCommand`/`core.fsmonitor` config injection, and PEP 508 `pip` package list injection.
+- **SQL, Cypher & NoSQL Injection (`CWE-89` / `CWE-943`):** Comment-split stacked SQLi (`DR/**/OP`), clause-level injection (`where_clause`, `order_by`, `having`), `EXPLAIN ANALYZE` destructive DML execution, analytical file-read functions (`read_text`, `read_parquet`), SQL identifier breakout, Neo4j/Memgraph Cypher property identifier injection, and MongoDB/Document-DB `$where`/`$function` JS execution & `$regex` credential oracles.
+- **Code Sandbox Escape, SSTI, XXE & Unsafe Deserialization (`CWE-94` / `CWE-502` / `CWE-611` / `CWE-1336`):** Python dunder sandbox escape gadgets (`__subclasses__`, `__globals__`, `dir.__self__.__import__`, `asyncio.create_subprocess_exec`), process environment `*_API_KEY` harvesting, Jinja2/Mako Server-Side Template Injection (`{{ self.__init__.__globals__... }}`), XML External Entity (`<!ENTITY` / `<!DOCTYPE SYSTEM`) expansion, Python `pickle` payload blocking (with binary molecule magic allowlist), and PyYAML `!!python/object/apply` / `jsonpickle` `py/object` deserialization blocking.
+- **SSRF, Runtime Endpoint Hijack, RBAC Bypass, MQTT & OAuth XSS (`CWE-20` / `CWE-79` / `CWE-200` / `CWE-639` / `CWE-863` / `CWE-918`):** AWS/GCP/Alibaba Cloud IMDSv1 (`169.254.169.254`), IPv6-mapped IPv4 loopback (`[::ffff:127.0.0.1]`), runtime notebook/service endpoint re-pointing (`GHSA-rvjm-7hvp-f868`), meta-tool inner dispatch (`tool_execute` / `call_tool`), `kubectl --dry-run=none` bypass, read-only GraphQL mutation smuggling, tenant organization boundary enforcement, sensitive email attachment dotfile blocking (`~/.ssh/id_rsa`, `~/.mail-mcp/`), MQTT wildcard topic injection (`#`, `+`), and reflected OAuth callback XSS (`<script>`).
 
 ---
 

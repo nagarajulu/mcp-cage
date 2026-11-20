@@ -3,8 +3,42 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="mcp-cage v0.4.0 — Zero-Code Wire & Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI, Antigravity & MCP by Nagarajulu (Naga) Aerakoni." />
-  <title>mcp-cage v0.4.0 — Zero-Code Wire &amp; Native-Hook Security Firewall for AI Coding Agents &amp; MCP</title>
+  <meta name="description" content="mcp-cage — Zero-Code Wire &amp; Native-Hook Security Firewall for Claude Code, Cursor, Codex, Gemini CLI, Antigravity &amp; Model Context Protocol (MCP). Enforces Dual-Lattice Information Flow Control (DIFC), 34 empirical CWE parameter guards, secret scrubbing, and Agent Skill AST auditing." />
+  <meta name="keywords" content="mcp, model-context-protocol, mcp-security, mcp-firewall, mcp-proxy, claude-code, cursor, gemini-cli, codex-cli, antigravity, prompt-injection, indirect-prompt-injection, xpia, lethal-trifecta, tool-poisoning, mcptox, curxecute, difc, information-flow-control, taint-tracking, secret-scrubbing, agent-skills, skill-scanner, owasp-llm, mitre-atlas, seatbelt, landlock" />
+  <meta property="og:title" content="mcp-cage — Zero-Code Wire &amp; Native-Hook Security Firewall for AI Coding Agents &amp; MCP" />
+  <meta property="og:description" content="Deterministic Dual-Plane Reference Monitor (JSON-RPC Wire Proxy + PreToolUse Lifecycle Hooks + 7-Vector Skill AST Scanner) for Claude Code, Cursor, Gemini CLI, Codex &amp; MCP." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://nagarajulu.github.io/mcp-cage/" />
+  <link rel="canonical" href="https://nagarajulu.github.io/mcp-cage/" />
+  <title>mcp-cage — Zero-Code Wire &amp; Native-Hook Security Firewall for AI Coding Agents &amp; MCP</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "mcp-cage",
+    "applicationCategory": "SecurityApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "softwareVersion": "0.4.1",
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://nagarajulu.github.io/mcp-cage/",
+    "codeRepository": "https://github.com/nagarajulu/mcp-cage",
+    "downloadUrl": "https://pypi.org/project/mcp-cage/",
+    "author": {
+      "@type": "Person",
+      "name": "Nagarajulu Aerakoni"
+    },
+    "description": "Zero-Dependency Dual-Plane Security Reference Monitor & Wire-DIFC Firewall for Model Context Protocol (MCP) Servers and Autonomous Coding Agents (Claude Code, Cursor, Gemini CLI, Codex, Antigravity).",
+    "featureList": [
+      "Dual-Lattice Information Flow Control (Integrity x Confidentiality) in SQLite WAL",
+      "Bidirectional Secret Scrubbing & Destination-Bound Format-Preserving Vault",
+      "34-Mechanism Empirical CWE Parameter Guards (CWE-20, CWE-22, CWE-78, CWE-79, CWE-88, CWE-89, CWE-94, CWE-200, CWE-502, CWE-611, CWE-639, CWE-863, CWE-918, CWE-943, CWE-1336)",
+      "4-Slot Tool Schema Canonicalizer & SHA-256 mcp-lock.json Pinning",
+      "7-Vector Agent Skill & Rule Static + Python AST Auditor (mcp-cage audit-skills)",
+      "CurXecute / MCPoison Config Auditor (mcp-cage audit-config)",
+      "Schema-to-Kernel Sandbox Compiler (macOS Seatbelt SBPL & Linux Landlock/bwrap)"
+    ]
+  }
+  </script>
   <style>
     :root {
       --bg: #070b14;

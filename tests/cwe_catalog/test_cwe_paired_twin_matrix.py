@@ -600,6 +600,98 @@ def build_empirical_cwe_catalog(workspace: Path) -> list[EmpiricalCWETwinSpec]:
                 {"agent_id": "worker-01", "custom_prompt": "Fix 'auth' module"},
             ),
         ),
+        # 29. XML External Entity (XXE) & SVG DOCTYPE SYSTEM Expansion (CWE-611)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-611-01_XXE_AND_SVG_ENTITY_EXPANSION",
+            cwe_id="CWE-611",
+            description="XML External Entity (<!ENTITY / <!DOCTYPE SYSTEM) injection in XML/SVG/RSS rendering tools",
+            tool_name="render_svg_diagram",
+            attack_payloads=(
+                {"svg": '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg>&xxe;</svg>'},
+                {"xml_body": '<!DOCTYPE foo PUBLIC "-//W3C//DTD XHTML 1.0//EN" "http://169.254.169.254/latest/meta-data/"><foo/>'},
+            ),
+            expected_block_substrings=("CWE-611",),
+            benign_payloads=(
+                {"svg": '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>'},
+            ),
+        ),
+        # 30. Server-Side Template Injection (SSTI) in Jinja2/Prompt/Email Templates (CWE-1336)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-1336-01_SSTI_TEMPLATE_INJECTION",
+            cwe_id="CWE-1336",
+            description="Jinja2/Mako/Twig dunder and OS import Server-Side Template Injection in template rendering tools",
+            tool_name="render_prompt_template",
+            attack_payloads=(
+                {"template": "Hello {{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}"},
+                {"template": "{% import 'os' %}{{ os.system('whoami') }}"},
+                {"template": "{{ cycler.__init__.__globals__.os.popen('id').read() }}"},
+            ),
+            expected_block_substrings=("CWE-1336",),
+            benign_payloads=(
+                {"template": "Hello {{ customer_name }}, your order {{ order_id }} is ready!"},
+            ),
+        ),
+        # 31. NoSQL Server-Side JavaScript & Sensitive Credential Regex Oracle (CWE-943)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-943-02_NOSQL_OPERATOR_INJECTION",
+            cwe_id="CWE-943",
+            description="MongoDB/Document-DB $where/$function JS execution and $regex credential extraction oracle",
+            tool_name="mongodb_find_documents",
+            attack_payloads=(
+                {"collection": "users", "filter": {"$where": "this.isAdmin == true || sleep(5000)"}},
+                {"collection": "users", "filter": {"api_key": {"$regex": "^sk_live_a.*"}}},
+                {"collection": "users", "filter": {"password": {"$ne": ""}}},
+            ),
+            expected_block_substrings=("CWE-943", "CWE-200"),
+            benign_payloads=(
+                {"collection": "orders", "filter": {"status": {"$in": ["paid", "shipped"]}, "total": {"$gt": 25}}},
+            ),
+        ),
+        # 32. Unsafe YAML (!!python/object/apply) & jsonpickle (py/object) Deserialization (CWE-502)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-502-02_YAML_AND_JSONPICKLE_DESERIALIZATION",
+            cwe_id="CWE-502",
+            description="PyYAML !!python/object/apply and jsonpickle py/object arbitrary object deserialization gadgets",
+            tool_name="apply_workflow_manifest",
+            attack_payloads=(
+                {"manifest_yaml": "!!python/object/apply:os.system ['id']"},
+                {"payload": {"py/object": "subprocess.Popen", "args": ["id"]}},
+            ),
+            expected_block_substrings=("CWE-502",),
+            benign_payloads=(
+                {"manifest_yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n"},
+            ),
+        ),
+        # 33. GraphQL Mutation Smuggling Inside Read-Only Query Tools (CWE-863)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-863-04_GRAPHQL_MUTATION_SMUGGLING",
+            cwe_id="CWE-863",
+            description="Smuggling destructive GraphQL mutation operations inside read-only graphql_query tools",
+            tool_name="graphql_query_issues",
+            attack_payloads=(
+                {"query": "mutation { deleteRepository(input: {id: \"repo-1\"}) { clientMutationId } }"},
+            ),
+            expected_block_substrings=("CWE-863",),
+            benign_payloads=(
+                {"query": "query { viewer { login issues(first: 10) { nodes { title } } } }"},
+            ),
+        ),
+        # 34. Git ext:: Remote Transport & core.sshCommand / fsmonitor Config RCE (CWE-88 / CWE-78)
+        EmpiricalCWETwinSpec(
+            mechanism_id="CWE-88-02_GIT_EXT_TRANSPORT_AND_CONFIG_RCE",
+            cwe_id="CWE-88",
+            description="Git ext::/fd:: protocol helper command execution and core.sshCommand/fsmonitor config injection",
+            tool_name="git_fetch_remote",
+            attack_payloads=(
+                {"remote": "ext::sh -c touch% /tmp/pwn"},
+                {"config_key": "core.sshCommand=sh -c id"},
+                {"options": "core.fsmonitor=touch /tmp/pwn"},
+            ),
+            expected_block_substrings=("CWE-88", "CWE-78"),
+            benign_payloads=(
+                {"remote": "origin", "branch_name": "feature/security-hardening"},
+            ),
+        ),
     ]
 
 
@@ -794,6 +886,133 @@ class TestEmpiricalCWECatalogMatrix(unittest.TestCase):
             1.5,
             f"Mean per-call latency across CWE catalog {mean_ms:.3f}ms exceeded 1.5ms budget",
         )
+
+    def test_04_zero_false_positive_developer_workflow_corpus(self) -> None:
+        """
+        Pillar 1 Precision Guarantee: Evaluates a comprehensive corpus of realistic daily
+        developer tool calls that contain edge-case syntax (Makefile `$(...)` inside file
+        `content`/`diff`, slashed `repo_name="owner/repo"` and `branch_name="feature/auth"`,
+        SQL `WITH` CTEs, snake_case `update_count`/`drop_rate` columns, 40-char Git commit
+        SHAs, 26-char ULIDs, and prefixed Stripe/OpenAI IDs) to guarantee 0.0% false positives.
+        """
+        from mcp_cage.vault import is_covert_exfil_identifier
+
+        engine = MCPCageEngine(
+            server_name="dev_workflow_srv",
+            state_machine=SessionTaintStateMachine(db_path=self.db_path, session_id="s-dev-fp"),
+            scrubber=BidirectionalSecretScrubber(db_path=self.db_path),
+            verifier=SchemaLockVerifier(self.lock_path),
+            workspace_root=self.workspace,
+        )
+
+        benign_developer_calls: list[tuple[str, dict[str, Any]]] = [
+            # 1. File write/edit containing `$(...)` Makefile/Bash command substitution in `content` / `replacement`
+            (
+                "write_file",
+                {
+                    "path": str(self.workspace / "src" / "deploy_helper.sh"),
+                    "content": "#!/usr/bin/env bash\nGIT_SHA=$(git rev-parse HEAD)\necho \"Deploying ${GIT_SHA}\"\n",
+                },
+            ),
+            (
+                "edit_file",
+                {
+                    "path": str(self.workspace / "src" / "main.py"),
+                    "target": "print('ok')",
+                    "replacement": "cmd = '$(docker ps -q)'\nsql = 'SELECT * FROM users; DROP TABLE temp;'\n",
+                },
+            ),
+            # 2. Issue comment / PR description containing code blocks, SQL snippets, and `$(...)`
+            (
+                "create_issue_comment",
+                {
+                    "issue_number": 42,
+                    "body": "To reproduce:\n```bash\nexport TAG=$(git describe --tags)\n```\nAnd run `DROP TABLE IF EXISTS staging_cache;`",
+                },
+            ),
+            # 3. Slashed namespace identifiers (`repo_name`, `branch_name`, `model_name`, `image_name`)
+            (
+                "get_repository_details",
+                {
+                    "repo_name": "modelcontextprotocol/servers",
+                    "branch_name": "feature/oauth-hardening",
+                    "tag_name": "releases/v1.2.0",
+                },
+            ),
+            (
+                "load_hf_model",
+                {
+                    "model_name": "meta-llama/Llama-3.3-70B-Instruct",
+                    "dataset_name": "allenai/wildchat-1m",
+                },
+            ),
+            # 4. Complex analytical SQL CTEs (`WITH ... SELECT`), subqueries, and snake_case `update_count` / `delete_flag`
+            (
+                "run_warehouse_query",
+                {
+                    "statement": (
+                        "WITH active_orgs AS ("
+                        "  SELECT org_id, update_count, delete_flag, drop_rate "
+                        "  FROM telemetry.org_metrics WHERE is_deleted = FALSE"
+                        ") "
+                        "SELECT org_id, update_count FROM active_orgs WHERE org_id IN (SELECT org_id FROM billing.paid)"
+                    ),
+                },
+            ),
+            # 5. Apostrophes in natural-language SQL filter values (`Rob's iPhone`, `O'Reilly Media`)
+            (
+                "search_health_records_query",
+                {
+                    "params": {
+                        "record_type": "HKQuantityTypeIdentifierHeartRate",
+                        "source_name": "O'Connor's Apple Watch",
+                    }
+                },
+            ),
+            # 6. Benign SVG, Jinja2 prompt template, MongoDB $in/$gt query, Kubernetes YAML, and GraphQL query
+            (
+                "render_svg_diagram",
+                {"svg": '<svg viewBox="0 0 100 100"><rect width="80" height="80"/></svg>'},
+            ),
+            (
+                "render_prompt_template",
+                {"template": "Summarize PR #{{ pr_number }} by {{ author_name }} in {{ repo_slug }}."},
+            ),
+            (
+                "mongodb_find_documents",
+                {"collection": "events", "filter": {"severity": {"$in": ["HIGH", "CRITICAL"]}, "count": {"$gte": 1}}},
+            ),
+            (
+                "graphql_query_issues",
+                {"query": "query GetIssues($first: Int!) { repository(owner: \"org\", name: \"repo\") { issues(first: $first) { nodes { id title } } } }"},
+            ),
+        ]
+
+        for idx, (tool_name, args) in enumerate(benign_developer_calls, start=1):
+            with self.subTest(workflow_call=tool_name, idx=idx):
+                fwd, imm = engine.process_client_to_server(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": idx + 5000,
+                        "method": "tools/call",
+                        "params": {"name": tool_name, "arguments": args},
+                    }
+                )
+                self.assertIsNotNone(fwd, f"False positive on developer workflow {tool_name}: {imm}")
+                self.assertIsNone(imm)
+
+        # 7. Verify canonical identifiers (UUIDv4, 40-char Git SHA, 64-char SHA-256, 26-char ULID, Stripe/OpenAI IDs)
+        canonical_ids = [
+            ("request_uuid", "550e8400-e29b-41d4-a716-446655440000"),
+            ("commit_id", "e2799c713fbe3e38ca694399662cb486395da219"),
+            ("sha256_hash", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ("ulid_id", "01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            ("customer_id", "cus_NffrFeUfNV2Hib998877"),
+            ("thread_id", "thread_abc123DEF456ghi789JKL012"),
+        ]
+        for param_name, id_val in canonical_ids:
+            flagged, reason = is_covert_exfil_identifier(param_name, id_val)
+            self.assertFalse(flagged, f"False positive on canonical identifier {param_name}={id_val}: {reason}")
 
 
 if __name__ == "__main__":
