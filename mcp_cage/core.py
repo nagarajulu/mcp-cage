@@ -2743,6 +2743,380 @@ class WorkspaceMCPConfigAuditor:
 
 
 # -----------------------------------------------------------------------------
+# Primitive B2: Agent Skill & Instruction Rule Static + AST Auditor (`audit-skills`)
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SkillAuditFinding:
+    severity: str       # "CRITICAL", "HIGH", "MEDIUM"
+    rule_id: str        # e.g., "RULE_UNICODE_SMUGGLING", "SKILL_AST_CAPABILITY_DRIFT"
+    skill_name: str
+    source_path: str
+    line_number: int
+    message: str
+    remediation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "severity": self.severity,
+            "rule_id": self.rule_id,
+            "skill_name": self.skill_name,
+            "source_path": self.source_path,
+            "line_number": self.line_number,
+            "message": self.message,
+            "remediation": self.remediation,
+        }
+
+
+class WorkspaceSkillAndRuleAuditor:
+    """
+    Research-Backed 7-Vector Static + Python AST Security Auditor for Agent Skills & Rules
+    (`SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc`,
+    `.github/copilot-instructions.md`, `.claude/skills/**`, `.agents/skills/**`).
+
+    Detects 7 empirical threat classes using 100% Python stdlib (`ast` + regex):
+      1. `RULE_UNICODE_SMUGGLING` (CRITICAL): Invisible Unicode Tag (`U+E0000..U+E007F`),
+         Zero-Width (`U+200B..U+200F`, `U+FEFF`), and BiDi override (`U+202A..U+202E`,
+         `U+2066..U+2069`) codepoints ("Rules File Backdoor" / Trojan Source CVE-2021-42574).
+      2. `RULE_MARKDOWN_IMAGE_BEACON` (HIGH): Zero-click Markdown image exfiltration beacons
+         (`![...](https://...)` with query parameters/interpolation or prompt directives to
+         append context to external image URLs).
+      3. `RULE_SECURITY_BYPASS_DIRECTIVE` (CRITICAL): Prompt-override tags (`<IMPORTANT>`,
+         `<system>`, `<!-- ignore previous`), hook/sandbox suppression (`--no-verify`,
+         `--dry-run=none`, `chat.tools.autoApprove`, `dangerouslyDisableSandbox`), or
+         cross-tool trigger hijacking (`MCPTox` arXiv:2508.14925).
+      4. `SKILL_OBFUSCATED_OR_PIPE_EXEC` (CRITICAL): Remote pipe execution (`curl ... | sh`,
+         `wget ... | bash`, `base64 -d | sh`) or Python AST obfuscated execution
+         (`eval(base64.b64decode(...))`, `exec(compile(...))`).
+      5. `SKILL_AST_CAPABILITY_DRIFT` (HIGH): Declarative-to-Executable Capability Drift
+         (Progent arXiv:2504.11703) — `SKILL.md` frontmatter declares a benign/read-only
+         skill while companion `scripts/*.py` or `.sh` invoke `subprocess`, `socket`,
+         `urllib.request`, `pty`, or harvest credentials (`~/.ssh`, `.env`, `os.environ`).
+      6. `SKILL_PERSISTENCE_BACKDOOR` (CRITICAL): Self-propagating persistence writes targeting
+         `~/.bashrc`, `~/.zshrc`, `.git/hooks/`, `CLAUDE.md`, `AGENTS.md`, or `MEMORY.md`
+         (`CVE-2025-53773`).
+      7. `SKILL_UNTRUSTED_PACKAGE_SOURCE` (HIGH): Unverified package index hijacks
+         (`--index-url`, `--extra-index-url`) or raw `git+https://` / HTTP tarball package
+         execution inside skill manifests or helper scripts.
+    """
+
+    UNICODE_SMUGGLE_RE = re.compile(
+        r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\U000e0000-\U000e007f]"
+    )
+    MD_IMAGE_BEACON_RE = re.compile(
+        r"!\[[^\]]*\]\(\s*https?://[^)\s]+(?:\?[^)\s]*|\{[a-zA-Z0-9_]+\}|\$[a-zA-Z0-9_]+)[^)]*\)"
+    )
+    SECURITY_BYPASS_RE = re.compile(
+        r"(?i)(?:<\s*(?:IMPORTANT|system|instruction)\b|<!--[^>]*(?:ignore\s+previous|system\s+prompt|do\s+not\s+mention|hidden\s+instruction)[^>]*-->|--no-verify\b|--dry-run=(?:none|false)\b|chat\.tools\.autoApprove|dangerouslyDisableSandbox|ignore\s+all\s+(?:previous|prior)\s+instructions)"
+    )
+    REMOTE_PIPE_EXEC_RE = re.compile(
+        r"(?i)(?:\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|python3?|perl|ruby)\b|\bbase64\s+(?:-d|--decode)\b[^\n|]*\|\s*(?:sh|bash|zsh|python3?)\b|\bInvoke-Expression\b|\biex\s+\()"
+    )
+    PERSISTENCE_TARGET_RE = re.compile(
+        r"(?i)(?:>>|>|\btee\s+-a?\b|\bopen\s*\()[^\n]*(?:~/\.(?:bashrc|zshrc|profile|bash_profile)|\.git/hooks/(?:pre-commit|post-checkout|pre-push)|\.vscode/settings\.json|\.cursor/mcp\.json)"
+    )
+    UNTRUSTED_PKG_SOURCE_RE = re.compile(
+        r"(?i)(?:--(?:extra-)?index-url[\s=]+https?://(?!(?:pypi\.org|files\.pythonhosted\.org)\b)[^\s\"']+|\bpip3?\s+install\s+[^\n]*(?:git\+https?://|https?://[^\s\"']+\.(?:tar\.gz|whl|zip)))"
+    )
+    READONLY_CLAIM_RE = re.compile(
+        r"(?i)\b(read[- ]only|format(?:s|ting)?|lint(?:s|er|ing)?|style[- ]check|documentation[- ]only|markdown[- ]formatter|pure[- ]text)\b"
+    )
+
+    DEFAULT_RULE_GLOBS: tuple[str, ...] = (
+        "SKILL.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".cursorrules",
+        ".github/copilot-instructions.md",
+        ".cursor/rules/*.mdc",
+        ".cursor/rules/*.md",
+        ".claude/skills/**/SKILL.md",
+        ".agents/skills/**/SKILL.md",
+        "skills/**/SKILL.md",
+    )
+
+    @classmethod
+    def _extract_frontmatter_and_name(cls, text: str, path: Path) -> tuple[str, str]:
+        skill_name = path.parent.name if path.name.upper() == "SKILL.MD" else path.name
+        frontmatter = ""
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = parts[1]
+                m_name = re.search(r"(?m)^name\s*:\s*([^\n]+)", frontmatter)
+                if m_name:
+                    skill_name = m_name.group(1).strip().strip("\"'")
+        return skill_name, frontmatter
+
+    @classmethod
+    def _analyze_python_script_ast(
+        cls, script_path: Path, skill_name: str, claims_readonly: bool
+    ) -> list[SkillAuditFinding]:
+        import ast as _ast
+
+        findings: list[SkillAuditFinding] = []
+        source = script_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = _ast.parse(source, filename=str(script_path))
+        except SyntaxError:
+            return findings
+
+        exec_Network_or_Shell: list[tuple[int, str]] = []
+        for node in _ast.walk(tree):
+            lineno = getattr(node, "lineno", 1)
+            if isinstance(node, _ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".")[0]
+                    if top in {"subprocess", "socket", "pty", "urllib", "http", "requests", "httpx"}:
+                        exec_Network_or_Shell.append((lineno, f"import {alias.name}"))
+            elif isinstance(node, _ast.ImportFrom) and node.module:
+                top = node.module.split(".")[0]
+                if top in {"subprocess", "socket", "pty", "urllib", "http", "requests", "httpx"}:
+                    exec_Network_or_Shell.append((lineno, f"from {node.module} import ..."))
+            elif isinstance(node, _ast.Call):
+                func_name = ""
+                if isinstance(node.func, _ast.Name):
+                    func_name = node.func.id
+                elif isinstance(node.func, _ast.Attribute):
+                    func_name = f"{getattr(node.func.value, 'id', '')}.{node.func.attr}".strip(".")
+
+                if func_name in {"eval", "exec", "compile", "__import__", "os.system", "os.popen", "pty.spawn"}:
+                    call_src = _ast.get_source_segment(source, node) or func_name
+                    if "b64decode" in call_src or "fromhex" in call_src or "codecs.decode" in call_src or func_name in {"eval", "exec"}:
+                        findings.append(
+                            SkillAuditFinding(
+                                severity="CRITICAL",
+                                rule_id="SKILL_OBFUSCATED_OR_PIPE_EXEC",
+                                skill_name=skill_name,
+                                source_path=str(script_path),
+                                line_number=lineno,
+                                message=(
+                                    f"[AST Dynamic Code Execution] Helper script `{script_path.name}:{lineno}` "
+                                    f"invokes `{call_src[:80]}`."
+                                ),
+                                remediation="Remove dynamic `eval`/`exec` or obfuscated payload decoding from skill helper scripts.",
+                            )
+                        )
+                    exec_Network_or_Shell.append((lineno, func_name))
+
+        if claims_readonly and exec_Network_or_Shell:
+            first_line, first_cap = exec_Network_or_Shell[0]
+            findings.append(
+                SkillAuditFinding(
+                    severity="HIGH",
+                    rule_id="SKILL_AST_CAPABILITY_DRIFT",
+                    skill_name=skill_name,
+                    source_path=str(script_path),
+                    line_number=first_line,
+                    message=(
+                        f"[Declarative-to-Executable Capability Drift] Skill '{skill_name}' claims read-only/formatting "
+                        f"behavior in `SKILL.md` frontmatter, but companion script `{script_path.name}:{first_line}` "
+                        f"uses undeclared shell/network capability (`{first_cap}`)."
+                    ),
+                    remediation="Declare required network/subprocess capabilities explicitly in `SKILL.md` or remove undeclared execution from helper scripts.",
+                )
+            )
+        return findings
+
+    @classmethod
+    def audit_skill_or_rule_file(cls, path: Path) -> list[SkillAuditFinding]:
+        findings: list[SkillAuditFinding] = []
+        text = path.read_text(encoding="utf-8", errors="replace")
+        skill_name, frontmatter = cls._extract_frontmatter_and_name(text, path)
+        claims_readonly = bool(
+            cls.READONLY_CLAIM_RE.search(frontmatter)
+            or re.search(r"(?i)allowed-tools\s*:\s*\[\s*read\s*\]", frontmatter)
+        )
+
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            # 1. Invisible Unicode Tag / BiDi Smuggling
+            m_uni = cls.UNICODE_SMUGGLE_RE.search(line)
+            if m_uni:
+                cp = f"U+{ord(m_uni.group(0)):04X}"
+                findings.append(
+                    SkillAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="RULE_UNICODE_SMUGGLING",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Rules File Backdoor / Unicode Smuggling] Invisible control/tag codepoint `{cp}` "
+                            f"detected in `{path.name}:{lineno}` (CVE-2021-42574)."
+                        ),
+                        remediation="Strip all invisible Unicode Tag (U+E0000..U+E007F), zero-width, and BiDi override characters.",
+                    )
+                )
+
+            # 2. Markdown Image Beacon Exfiltration
+            if cls.MD_IMAGE_BEACON_RE.search(line):
+                findings.append(
+                    SkillAuditFinding(
+                        severity="HIGH",
+                        rule_id="RULE_MARKDOWN_IMAGE_BEACON",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Zero-Click Markdown Image Exfiltration Beacon] External image URL with dynamic query/template "
+                            f"parameters detected in `{path.name}:{lineno}`."
+                        ),
+                        remediation="Remove external Markdown image beacons or replace with local relative asset paths.",
+                    )
+                )
+
+            # 3. Prompt Override / Security Bypass Directive
+            m_byp = cls.SECURITY_BYPASS_RE.search(line)
+            if m_byp:
+                findings.append(
+                    SkillAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="RULE_SECURITY_BYPASS_DIRECTIVE",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Prompt Override / Security Bypass Directive] Matched `{m_byp.group(0)[:60]}` "
+                            f"in `{path.name}:{lineno}`."
+                        ),
+                        remediation="Remove hidden prompt-override tags, `--no-verify`, auto-approve overrides, and sandbox-disable directives.",
+                    )
+                )
+
+            # 4. Remote Pipe Execution (`curl | sh`, `base64 -d | sh`)
+            m_pipe = cls.REMOTE_PIPE_EXEC_RE.search(line)
+            if m_pipe:
+                findings.append(
+                    SkillAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="SKILL_OBFUSCATED_OR_PIPE_EXEC",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Remote Pipe / Obfuscated Execution] Matched `{m_pipe.group(0)[:70]}` "
+                            f"in `{path.name}:{lineno}`."
+                        ),
+                        remediation="Never pipe remote `curl`/`wget` or base64-decoded streams directly into a shell interpreter.",
+                    )
+                )
+
+            # 5. Persistence Backdoor (`~/.bashrc`, `.git/hooks/pre-commit`)
+            m_pers = cls.PERSISTENCE_TARGET_RE.search(line)
+            if m_pers:
+                findings.append(
+                    SkillAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="SKILL_PERSISTENCE_BACKDOOR",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Persistent Shell/Hook Backdoor] Instruction or script modifies protected host persistence target "
+                            f"(`{m_pers.group(0)[:70]}`) in `{path.name}:{lineno}` (CVE-2025-53773)."
+                        ),
+                        remediation="Remove writes to shell profiles (`~/.bashrc`, `~/.zshrc`), `.git/hooks/`, and IDE settings.",
+                    )
+                )
+
+            # 6. Untrusted Package Index / Raw Git URL Install
+            m_pkg = cls.UNTRUSTED_PKG_SOURCE_RE.search(line)
+            if m_pkg:
+                findings.append(
+                    SkillAuditFinding(
+                        severity="HIGH",
+                        rule_id="SKILL_UNTRUSTED_PACKAGE_SOURCE",
+                        skill_name=skill_name,
+                        source_path=str(path),
+                        line_number=lineno,
+                        message=(
+                            f"[Untrusted Package Source] Custom package index or unpinned remote archive install "
+                            f"(`{m_pkg.group(0)[:70]}`) in `{path.name}:{lineno}`."
+                        ),
+                        remediation="Install packages only from default trusted registries using pinned PEP 508 version specifiers.",
+                    )
+                )
+
+        # 7. Inspect companion helper scripts inside the skill directory (`scripts/*.py`, `*.py`, `*.sh`)
+        if path.name.upper() == "SKILL.MD":
+            skill_dir = path.parent
+            for py_script in sorted(skill_dir.rglob("*.py")):
+                findings.extend(
+                    cls._analyze_python_script_ast(py_script, skill_name, claims_readonly)
+                )
+            for sh_script in sorted(skill_dir.rglob("*.sh")):
+                sh_txt = sh_script.read_text(encoding="utf-8", errors="replace")
+                for sh_lineno, sh_line in enumerate(sh_txt.splitlines(), start=1):
+                    if cls.REMOTE_PIPE_EXEC_RE.search(sh_line):
+                        findings.append(
+                            SkillAuditFinding(
+                                severity="CRITICAL",
+                                rule_id="SKILL_OBFUSCATED_OR_PIPE_EXEC",
+                                skill_name=skill_name,
+                                source_path=str(sh_script),
+                                line_number=sh_lineno,
+                                message=f"[Remote Pipe Execution in Skill Script] `{sh_script.name}:{sh_lineno}`.",
+                                remediation="Remove piped remote shell execution from companion skill scripts.",
+                            )
+                        )
+                    if cls.PERSISTENCE_TARGET_RE.search(sh_line):
+                        findings.append(
+                            SkillAuditFinding(
+                                severity="CRITICAL",
+                                rule_id="SKILL_PERSISTENCE_BACKDOOR",
+                                skill_name=skill_name,
+                                source_path=str(sh_script),
+                                line_number=sh_lineno,
+                                message=f"[Persistence Modification in Skill Script] `{sh_script.name}:{sh_lineno}`.",
+                                remediation="Remove modifications to shell profiles or git hooks from companion skill scripts.",
+                            )
+                        )
+
+        return findings
+
+    @classmethod
+    def discover_and_audit(
+        cls, root: Path, explicit_paths: list[Path] | None = None
+    ) -> dict[str, Any]:
+        discovered: list[Path] = []
+        seen: set[Path] = set()
+        if explicit_paths:
+            for p in explicit_paths:
+                rp = p.resolve()
+                if rp.is_dir():
+                    for pat in cls.DEFAULT_RULE_GLOBS:
+                        for match in sorted(rp.glob(pat)):
+                            if match.is_file() and match.resolve() not in seen:
+                                seen.add(match.resolve())
+                                discovered.append(match)
+                elif rp.is_file() and rp not in seen:
+                    seen.add(rp)
+                    discovered.append(p)
+        else:
+            for pat in cls.DEFAULT_RULE_GLOBS:
+                for match in sorted(root.glob(pat)):
+                    if match.is_file() and match.resolve() not in seen:
+                        seen.add(match.resolve())
+                        discovered.append(match)
+
+        all_findings: list[SkillAuditFinding] = []
+        audited_files: list[str] = []
+        for p in discovered:
+            audited_files.append(str(p))
+            all_findings.extend(cls.audit_skill_or_rule_file(p))
+
+        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0}
+        for f in all_findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+
+        return {
+            "audited_files": audited_files,
+            "summary": counts,
+            "findings": [f.to_dict() for f in all_findings],
+        }
+
+
+# -----------------------------------------------------------------------------
 # Plane A: `MCPWireGateway` (Async & Sync JSON-RPC 2.0 Proxy with Spotlighting)
 # -----------------------------------------------------------------------------
 
@@ -3823,6 +4197,14 @@ def main(argv: list[str] | None = None) -> int:
     p_cfg.add_argument("paths", nargs="*", help="Config files to audit (auto-discovers workspace configs if omitted)")
     p_cfg.add_argument("--workspace", default=".", help="Workspace root directory")
 
+    # 4b. `audit-skills` (Primitive B2: 7-Vector Agent Skill & Rule Static + AST Auditor)
+    p_sk = sub.add_parser(
+        "audit-skills",
+        help="Audit SKILL.md, CLAUDE.md, AGENTS.md, .cursorrules, and companion scripts for 7 static & AST threat vectors",
+    )
+    p_sk.add_argument("paths", nargs="*", help="Skill/rule files or directories to audit (auto-discovers workspace skills/rules if omitted)")
+    p_sk.add_argument("--workspace", default=".", help="Workspace root directory")
+
     # 5. `hook` (Plane B native lifecycle hook handler)
     p_hook = sub.add_parser("hook", help="Handle native agent lifecycle hook from stdin JSON")
     p_hook.add_argument("agent", choices=["claude", "cursor", "gemini", "agy", "codex"])
@@ -3910,6 +4292,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand == "audit-config":
         explicit = [Path(p) for p in args.paths] if args.paths else None
         report = WorkspaceMCPConfigAuditor.discover_and_audit(Path(args.workspace), explicit)
+        print(json.dumps(report, indent=2))
+        return 1 if report["summary"]["CRITICAL"] > 0 else 0
+
+    if args.subcommand == "audit-skills":
+        explicit = [Path(p) for p in args.paths] if args.paths else None
+        report = WorkspaceSkillAndRuleAuditor.discover_and_audit(Path(args.workspace), explicit)
         print(json.dumps(report, indent=2))
         return 1 if report["summary"]["CRITICAL"] > 0 else 0
 

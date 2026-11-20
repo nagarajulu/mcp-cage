@@ -38,6 +38,30 @@ jobs:
       - name: Install build frontend
         run: python3 -m pip install --upgrade build
 
+      - name: Auto-resolve non-colliding PyPI version (PEP 440 post-release if version already exists on PyPI)
+        run: |
+          python3 -c '
+          import json, os, re, urllib.request
+          from pathlib import Path
+          pyproj = Path("pyproject.toml")
+          txt = pyproj.read_text(encoding="utf-8")
+          ver = re.search(r"^version\s*=\s*\"([^\"]+)\"", txt, re.M).group(1)
+          try:
+              with urllib.request.urlopen("https://pypi.org/pypi/mcp-cage/json", timeout=10) as r:
+                  published = set(json.loads(r.read().decode()).get("releases", {}).keys())
+          except Exception:
+              published = set()
+          if ver in published:
+              run_no = os.environ.get("GITHUB_RUN_NUMBER", "1")
+              new_ver = f"{ver}.post{run_no}"
+              print(f"Version {ver} already exists on PyPI; stamping PEP 440 post-release {new_ver}")
+              pyproj.write_text(re.sub(r"^(version\s*=\s*\")[^\"]+(\")", rf"\g<1>{new_ver}\2", txt, count=1, flags=re.M), encoding="utf-8")
+              core = Path("mcp_cage/core.py")
+              core.write_text(re.sub(r"^(__version__\s*=\s*\")[^\"]+(\")", rf"\g<1>{new_ver}\2", core.read_text(encoding="utf-8"), count=1, flags=re.M), encoding="utf-8")
+          else:
+              print(f"Version {ver} is new on PyPI; building {ver} as-is.")
+          '
+
       - name: Build sdist and wheel
         run: python3 -m build
 

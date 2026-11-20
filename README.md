@@ -50,9 +50,17 @@ When all three meet in a single session—Simon Willison's **Lethal Trifecta**�
 - **MELON Provenance Attribution:** Extracts URLs, domains, and email addresses from untrusted external inputs (`UNTRUSTED_SOURCE`) and hard-denies any subsequent sink or shell call targeting those untrusted entities (`[PROVENANCE HIJACK BLOCKED]`).
 - **Zero-Fatigue UX:** Distinguishes benign reads (`README.md` + teammate issues stay `ENDORSED`/`PUBLIC`), allows safe workspace-local code edits, and supports **5-minute scoped workspace edit leases** (`LEASE_MUTATOR_5M`) while keeping external egress locked.
 
-### 4. `CurXecute` Config Linter (`audit-config`) & `MCPTox` Schema Lockfile Verification
+### 4. `CurXecute` Config Linter (`audit-config`), 7-Vector Skill/Rule AST Scanner (`audit-skills`) & `MCPTox` Schema Lockfile Verification
 - **On-the-Wire Tool Sanitization & Rug-Pull Detection (`SchemaLockVerifier`):** Strips `<IMPORTANT>`, `<system>`, HTML comments, and cross-server shadowing directives from `tools/list` descriptions prior to SHA-256 pinning in `mcp-lock.json`.
 - **Workspace Config Auditor (`mcp-cage audit-config`):** Scans `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, and `claude_desktop_config.json` for `CurXecute` relative-path RCE (`./`, `../`, `/tmp/`, `bash -c`, command chaining), hardcoded plaintext API keys in `env` blocks, and unwrapped MCP servers.
+- **7-Vector Agent Skill & Rule Static + AST Auditor (`mcp-cage audit-skills` / `WorkspaceSkillAndRuleAuditor`):** Scans `SKILL.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules/*.mdc`, `.github/copilot-instructions.md`, `.claude/skills/**`, and companion `scripts/*.py` (via Python `ast.parse()`) for:
+  1. `RULE_UNICODE_SMUGGLING` (Invisible Unicode Tag `U+E0000..U+E007F`, zero-width, and BiDi overrides — *"Rules File Backdoor"* / `CVE-2021-42574`)
+  2. `RULE_MARKDOWN_IMAGE_BEACON` (Zero-click Markdown image exfiltration beacons `![...](https://...?...)`)
+  3. `RULE_SECURITY_BYPASS_DIRECTIVE` (`<IMPORTANT>`, `--no-verify`, `chat.tools.autoApprove`, `dangerouslyDisableSandbox`)
+  4. `SKILL_OBFUSCATED_OR_PIPE_EXEC` (`curl ... | sh` and Python AST `eval(base64.b64decode(...))` / `exec(...)`)
+  5. `SKILL_AST_CAPABILITY_DRIFT` (Declarative-to-Executable Capability Drift: `SKILL.md` frontmatter claims read-only/formatting while companion `scripts/*.py` invoke `subprocess`/`socket`/`urllib`)
+  6. `SKILL_PERSISTENCE_BACKDOOR` (Self-propagating writes to `~/.bashrc`, `~/.zshrc`, or `.git/hooks/`)
+  7. `SKILL_UNTRUSTED_PACKAGE_SOURCE` (Malicious `--index-url` or unpinned `git+https://` package installs)
 
 ### 5. Zero-Config Empirical Wire-Level Parameter Guards (`v0.3.0`)
 Automatically enforced out of the box by `MCPCageEngine` (`MCPWireGateway`), `DynamicProfileAwareProxy`, and Plane B hooks:
@@ -101,8 +109,9 @@ python3 run_all_regression_suites.py
 # 2. Compile an OS Kernel Seatbelt SBPL (macOS) or Landlock/bwrap (Linux) Sandbox Profile
 mcp-cage compile-sandbox --workspace . --os auto
 
-# 3. Audit workspace MCP configs for CurXecute RCE & hardcoded secrets
+# 3. Audit workspace MCP configs (.mcp.json) AND Agent Skills/Rules (SKILL.md, CLAUDE.md, .cursorrules, scripts/*.py)
 mcp-cage audit-config
+mcp-cage audit-skills
 
 # 4. Run static Toxic-Flow Graph Analysis (mcp-sploit)
 mcp-sploit audit

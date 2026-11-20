@@ -14,7 +14,9 @@ from mcp_cage.core import (
     MCPCageEngine,
     MCPWireGateway,
     SchemaToKernelSandboxCompiler,
+    SkillAuditFinding,
     WorkspaceMCPConfigAuditor,
+    WorkspaceSkillAndRuleAuditor,
     handle_cli_hook,
 )
 
@@ -24,6 +26,8 @@ __all__ = [
     "MCPCageEngine",
     "MCPWireGateway",
     "SchemaToKernelSandboxCompiler",
+    "SkillAuditFinding",
     "WorkspaceMCPConfigAuditor",
+    "WorkspaceSkillAndRuleAuditor",
     "handle_cli_hook",
 ]
