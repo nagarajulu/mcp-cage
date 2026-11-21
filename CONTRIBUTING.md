@@ -74,4 +74,15 @@ git config core.hooksPath .githooks
 python3 run_all_regression_suites.py
 ```
 
-All **9/9 verification suites** (including `.githooks/pre-commit`, stdlib-only purity verification, and sub-1.5ms wire latency budgets) must pass with zero warnings.
+All **10/10 verification suites** (including `.githooks/pre-commit`, stdlib-only purity verification, and sub-1.5ms wire latency budgets) must pass with zero warnings.
+
+---
+
+## 4. Version Bump & GitHub Profile Bio Page (`https://github.com/nagarajulu`) Sync Checklist
+
+Whenever `mcp-cage` bumps its version in [`pyproject.toml`](pyproject.toml) and [`mcp_cage/core.py`](mcp_cage/core.py) (automatically detected by `.githooks/pre-commit`):
+
+1. **Update [`CHANGELOG.md`](CHANGELOG.md)** with the new version section and empirical CWE / architectural highlights.
+2. **Update the GitHub Profile Bio Page ([`https://github.com/nagarajulu`](https://github.com/nagarajulu) / `nagarajulu/nagarajulu` `README.md`)** in this priority order:
+   - **1st (Top Featured):** **`mcp-cage`** — Repository ([`https://github.com/nagarajulu/mcp-cage`](https://github.com/nagarajulu/mcp-cage)), Live Interactive Showcase ([`https://nagarajulu.github.io/mcp-cage/`](https://nagarajulu.github.io/mcp-cage/)), and PyPI Package ([`https://pypi.org/project/mcp-cage/`](https://pypi.org/project/mcp-cage/)) with the latest version badge (`v0.4.1+`) and 34-mechanism CWE / 7-vector Skill AST capabilities.
+   - **2nd (Featured Apps):** **`kinetic-bloom`** — Repository ([`https://github.com/nagarajulu/kinetic-bloom`](https://github.com/nagarajulu/kinetic-bloom)) and Live PWA ([`https://kineticbloom.org`](https://kineticbloom.org)) (*10-Minute Home Movement & Primitive Reflex Co-Regulation Companion*), followed by other applications.

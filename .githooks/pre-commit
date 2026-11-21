@@ -94,6 +94,23 @@ def main() -> int:
             f"[GATE6_VERSION_DRIFT] pyproject.toml version '{m_py.group(1)}' != mcp_cage.core.__version__ '{m_core.group(1)}'"
         )
 
+    # Version-bump reminder: notify to update GitHub profile bio page (https://github.com/nagarajulu)
+    # with mcp-cage first, followed by kinetic-bloom and other featured apps.
+    try:
+        prev_py = subprocess.check_output(
+            ["git", "show", "HEAD:pyproject.toml"], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
+        )
+        m_prev = re.search(r'^version\s*=\s*"([^"]+)"', prev_py, flags=re.MULTILINE)
+        if m_py and m_prev and m_py.group(1) != m_prev.group(1):
+            print(
+                f"\n🔔 [BIO PAGE UPDATE REMINDER] mcp-cage version bumped ({m_prev.group(1)} -> {m_py.group(1)})!\n"
+                "   Remember to update your GitHub profile bio page (https://github.com/nagarajulu / repo nagarajulu/nagarajulu):\n"
+                "   1. Featured first: mcp-cage (https://github.com/nagarajulu/mcp-cage | https://nagarajulu.github.io/mcp-cage/ | https://pypi.org/project/mcp-cage/)\n"
+                "   2. Featured apps:  kinetic-bloom (https://github.com/nagarajulu/kinetic-bloom | https://kineticbloom.org)\n"
+            )
+    except Exception:
+        pass
+
     # Gate 7: Showcase HTML parity check (`visualizer.html` == `docs/index.html`)
     vis_path = REPO_ROOT / "visualizer.html"
     docs_path = REPO_ROOT / "docs" / "index.html"
