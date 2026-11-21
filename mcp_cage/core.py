@@ -201,6 +201,16 @@ WORKSPACE_PATH_KEYS: tuple[str, ...] = (
     "inputPath",
     "project_path",
     "projectPath",
+    "project_dir",
+    "projectDir",
+    "repo_dir",
+    "repoDir",
+    "workspace_dir",
+    "workspaceDir",
+    "target_dir",
+    "targetDir",
+    "output_dir",
+    "outputDir",
 )
 LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
     {
@@ -216,8 +226,18 @@ LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
         "downloaddirectory",
         "projectpath",
         "project_path",
+        "project_dir",
+        "projectdir",
+        "repo_dir",
+        "repodir",
+        "workspace_dir",
+        "workspacedir",
+        "target_dir",
+        "targetdir",
         "output_path",
         "outputpath",
+        "output_dir",
+        "outputdir",
         "out_path",
         "outpath",
         "sample_path",
@@ -892,6 +912,13 @@ class StandardArgGuards:
                         False,
                         f"Embedded POSIX command substitution `$(...)` blocked in parameter '{k}' (CWE-78): '{item}'.",
                     )
+                if is_free_text and "$(" in item:
+                    for match in cls.INLINE_CMD_SUBST_RE.finditer(item):
+                        if WorkspaceSkillAndRuleAuditor.REMOTE_PIPE_EXEC_RE.search(match.group(0)[2:-1]):
+                            return (
+                                False,
+                                f"Embedded remote-pipe command substitution `$(...)` blocked in parameter '{k}' (CWE-78): '{item}'.",
+                            )
         return True, "OK"
 
     @classmethod

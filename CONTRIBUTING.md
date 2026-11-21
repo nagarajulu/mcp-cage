@@ -83,6 +83,9 @@ All **10/10 verification suites** (including `.githooks/pre-commit`, stdlib-only
 Whenever `mcp-cage` bumps its version in [`pyproject.toml`](pyproject.toml) and [`mcp_cage/core.py`](mcp_cage/core.py) (automatically detected by `.githooks/pre-commit`):
 
 1. **Update [`CHANGELOG.md`](CHANGELOG.md)** with the new version section and empirical CWE / architectural highlights.
-2. **Update the GitHub Profile Bio Page ([`https://github.com/nagarajulu`](https://github.com/nagarajulu) / `nagarajulu/nagarajulu` `README.md`)** in this priority order:
+2. **Update the Live Showcase & Security Fundamentals Academy ([`visualizer.html`](visualizer.html) and [`docs/index.html`](docs/index.html))** (enforced automatically by **Gate 9** in `.githooks/pre-commit`):
+   - Update the version badges and `#security-fundamentals` `data-sync-version` / `data-sync-cwe-count` attributes, and add any new vulnerability classes to the **10-Lesson Security Fundamentals for Software Engineers Academy** so engineers can see how the bug occurs in code and how `mcp-cage` blocks it on the wire.
+   - Copy `visualizer.html` to `docs/index.html` (enforced by **Gate 7**).
+3. **Update the GitHub Profile Bio Page ([`https://github.com/nagarajulu`](https://github.com/nagarajulu) / `nagarajulu/nagarajulu` `README.md`)** in this priority order:
    - **1st (Top Featured):** **`mcp-cage`** — Repository ([`https://github.com/nagarajulu/mcp-cage`](https://github.com/nagarajulu/mcp-cage)), Live Interactive Showcase ([`https://nagarajulu.github.io/mcp-cage/`](https://nagarajulu.github.io/mcp-cage/)), and PyPI Package ([`https://pypi.org/project/mcp-cage/`](https://pypi.org/project/mcp-cage/)) with the latest version badge (`v0.4.1+`) and 34-mechanism CWE / 7-vector Skill AST capabilities.
    - **2nd (Featured Apps):** **`kinetic-bloom`** — Repository ([`https://github.com/nagarajulu/kinetic-bloom`](https://github.com/nagarajulu/kinetic-bloom)) and Live PWA ([`https://kineticbloom.org`](https://kineticbloom.org)) (*10-Minute Home Movement & Primitive Reflex Co-Regulation Companion*), followed by other applications.

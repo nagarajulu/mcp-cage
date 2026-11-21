@@ -135,6 +135,22 @@ def main() -> int:
                         f"[GATE8_BROKEN_DOC_LINK] {md_file.name}:{lineno}: target '{rel}' does not exist in repository."
                     )
 
+    # Gate 9: Showcase HTML & Security Fundamentals Academy Version + CWE Catalog Sync Check
+    if vis_path.is_file() and m_py:
+        current_ver = m_py.group(1)
+        vis_txt = vis_path.read_text(encoding="utf-8", errors="ignore")
+        if f'data-sync-version="{current_ver}"' not in vis_txt:
+            violations.append(
+                f"[GATE9_SHOWCASE_VERSION_SYNC] visualizer.html / docs/index.html #security-fundamentals data-sync-version does not match pyproject.toml version '{current_ver}'. Update the Security Fundamentals Academy & showcase version badges!"
+            )
+        cwe_matrix_file = REPO_ROOT / "tests" / "cwe_catalog" / "test_cwe_paired_twin_matrix.py"
+        if cwe_matrix_file.is_file():
+            cwe_count = len(re.findall(r"^\s*EmpiricalCWETwinSpec\(", cwe_matrix_file.read_text(encoding="utf-8"), flags=re.MULTILINE))
+            if cwe_count > 0 and f'data-sync-cwe-count="{cwe_count}"' not in vis_txt:
+                violations.append(
+                    f"[GATE9_SHOWCASE_CWE_CATALOG_SYNC] visualizer.html / docs/index.html #security-fundamentals data-sync-cwe-count does not match current CWE catalog size ({cwe_count}). Update the Security Fundamentals Academy section when adding new CWE mechanisms!"
+                )
+
     # Gate 1 (Git History): Scan recent git commit messages
     log_out = subprocess.check_output(
         ["git", "log", "-n", "25", "--oneline"], cwd=REPO_ROOT, text=True
