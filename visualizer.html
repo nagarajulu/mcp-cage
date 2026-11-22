@@ -1050,11 +1050,11 @@
         <span class="pill-badge">📜 License: <strong>MIT</strong></span>
       </div>
 
-      <!-- 30-Second Above-the-Fold Quick-Install & Audit Bar -->
+      <!-- 30-Second Above-the-Fold Quick-Install & Audit Bar (4 Primary Entrypoints) -->
       <div class="hero-install-grid">
         <div class="card" style="padding:12px 14px;">
           <div style="font-size:11.5px; font-weight:700; color:var(--cyan); text-transform:uppercase; margin-bottom:6px;">
-            1. Install &amp; Pre-Flight Audit Workspace Configs + Agent Skills (&lt;30s)
+            1. Pre-Flight Audit Configs + Agent Skills (&lt;30s)
           </div>
           <div class="copyable">
             <span class="copy-wrap">
@@ -1070,17 +1070,49 @@ mcp-cage audit-skills --workspace .</pre>
         </div>
         <div class="card" style="padding:12px 14px;">
           <div style="font-size:11.5px; font-weight:700; color:var(--green); text-transform:uppercase; margin-bottom:6px;">
-            2. Wrap Any MCP Server or Compile an OS Kernel Seatbelt/Landlock Sandbox
+            2. Plane A — Wrap Any External MCP Server (Door 1)
           </div>
           <div class="copyable">
             <span class="copy-wrap">
-              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickWrapCode" aria-label="Copy wrap and sandbox compile commands">
+              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickWrapCode" aria-label="Copy Plane A MCP server wrap command">
                 <span aria-hidden="true">📋</span> Copy
               </button>
               <span class="copy-tip" role="status"></span>
             </span>
-            <pre class="code-box" id="heroQuickWrapCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-cage wrap --server filesystem --workspace . --mode shadow -- npx -y @modelcontextprotocol/server-filesystem .
-mcp-cage compile-sandbox --workspace . --os auto</pre>
+            <pre class="code-box" id="heroQuickWrapCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-cage wrap --server filesystem --workspace . --mode shadow \
+  -- npx -y @modelcontextprotocol/server-filesystem .</pre>
+          </div>
+        </div>
+        <div class="card" style="padding:12px 14px;">
+          <div style="font-size:11.5px; font-weight:700; color:var(--purple); text-transform:uppercase; margin-bottom:6px;">
+            3. Plane B — Hook Built-In Agent Tools &amp; Auto-Config (Door 2)
+          </div>
+          <div class="copyable">
+            <span class="copy-wrap">
+              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickHookCode" aria-label="Copy Plane B native agent hook and config generator commands">
+                <span aria-hidden="true">📋</span> Copy
+              </button>
+              <span class="copy-tip" role="status"></span>
+            </span>
+            <pre class="code-box" id="heroQuickHookCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-cage generate-config --workspace . --output-dir .
+# Hooks Claude Code, Cursor, Gemini CLI, Codex &amp; agy native tools:
+mcp-cage hook claude PreToolUse --db .mcp-cage/taint.db</pre>
+          </div>
+        </div>
+        <div class="card" style="padding:12px 14px;">
+          <div style="font-size:11.5px; font-weight:700; color:var(--amber); text-transform:uppercase; margin-bottom:6px;">
+            4. Toxic-Flow Graph Audit, OS Kernel Sandbox &amp; Live Status
+          </div>
+          <div class="copyable">
+            <span class="copy-wrap">
+              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickSandboxCode" aria-label="Copy toxic-flow audit, OS sandbox compilation, and status commands">
+                <span aria-hidden="true">📋</span> Copy
+              </button>
+              <span class="copy-tip" role="status"></span>
+            </span>
+            <pre class="code-box" id="heroQuickSandboxCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-sploit audit
+mcp-cage compile-sandbox --workspace . --os auto
+mcp-cage status --db .mcp-cage/taint.db</pre>
           </div>
         </div>
       </div>
@@ -1355,6 +1387,84 @@ mcp-cage compile-sandbox --workspace . --os auto</pre>
             <div style="font-size:12px; font-weight:800; color:#7dd3fc; margin-bottom:4px;">Key Point 4 · Audit Downloaded Skills &amp; Configs First</div>
             <div style="font-size:12px; color:var(--muted); line-height:1.5;">Third-party skills (<code>SKILL.md</code>), rule files (<code>.cursorrules</code>), and <code>.mcp.json</code> configs can hide invisible Unicode instructions or rogue scripts. <code>mcp-cage audit-skills</code> &amp; <code>audit-config</code> catch them pre-flight.</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Visual Explainer: Why Two Planes? Plane A (External MCP Servers) vs. Plane B (Built-In Agent Tools) -->
+      <div class="card" style="margin-bottom:20px; border-color: rgba(168,85,247,0.45); background: linear-gradient(180deg, rgba(168,85,247,0.06) 0%, rgba(13,19,34,0.92) 100%);">
+        <div class="card-title" style="margin-bottom:8px;">
+          🔀 Why Do You Hear About "Plane A" &amp; "Plane B"? — How AI Assistants Actually Use Two Separate Doors (And Why Securing Only One Fails)
+          <span class="badge badge-purple">Door 1: External Plug-In MCP Servers (Plane A) + Door 2: Built-In Agent Tools (Plane B)</span>
+        </div>
+        <p style="font-size:13px; color:var(--muted); margin:0 0 12px 0; line-height:1.6;">
+          Whether you use <strong>Claude Code, Cursor, Windsurf, Gemini CLI, Codex, or Antigravity (<code>agy</code>)</strong>, your AI assistant doesn't just use one tool system — it uses <strong>two separate doors</strong> to interact with the world. Most security tools only watch one door, leaving a fatal blind spot called a <strong>"Cross-Door" Attack</strong> (where untrusted content enters through Door 1 and steals data or runs commands through Door 2, or vice versa). <code>mcp-cage</code> locks <strong>both doors simultaneously</strong> and connects them to one shared memory brain (<code>.mcp-cage/taint.db</code>):
+        </p>
+
+        <div style="overflow-x:auto; background:#070b14; border:1px solid var(--border); border-radius:10px; padding:14px;">
+          <svg viewBox="0 0 1060 250" width="100%" height="auto" role="img" aria-label="Diagram comparing Plane A External Plug-In MCP Tools via mcp-cage wrap and Plane B Built-In Native Agent Tools via mcp-cage hook connected by one shared SQLite WAL taint.db state machine" style="min-width:820px; display:block; font-family: system-ui, -apple-system, sans-serif;">
+            <defs>
+              <marker id="paArrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981"/>
+              </marker>
+              <marker id="paArrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#a855f7"/>
+              </marker>
+              <marker id="paArrowRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1 L 10 5 L 0 9 z" fill="#ef4444"/>
+              </marker>
+            </defs>
+
+            <!-- Left Box: Door 1 / Plane A -->
+            <rect x="14" y="14" width="335" height="222" rx="10" fill="#071a18" stroke="#10b981" stroke-width="1.8"/>
+            <text x="28" y="38" fill="#6ee7b7" font-size="13" font-weight="800">🚪 DOOR 1 · PLANE A: External Plug-In MCP Servers</text>
+            <text x="28" y="56" fill="#a7f3d0" font-size="11">Apps you plug in via .mcp.json / claude_desktop_config.json:</text>
+            <text x="28" y="76" fill="#e2e8f0" font-size="11">• GitHub / GitLab MCP   • Slack / Email MCP</text>
+            <text x="28" y="93" fill="#e2e8f0" font-size="11">• Postgres / SQLite MCP • Web Fetch / Jira MCP</text>
+            <rect x="26" y="108" width="311" height="54" rx="7" fill="#052e23" stroke="#10b981" stroke-width="1.2"/>
+            <text x="36" y="127" fill="#6ee7b7" font-size="11" font-weight="800">🛡️ Protected by: mcp-cage wrap (JSON-RPC Wire Proxy)</text>
+            <text x="36" y="144" fill="#d1fae5" font-size="10.5">Intercepts stdio/HTTP pipes: 34 CWE parameter guards,</text>
+            <text x="36" y="157" fill="#d1fae5" font-size="10.5">Vault secret redaction ($MCP_VAULT_…), rug-pull lock</text>
+            <text x="28" y="184" fill="#fca5a5" font-size="10.5" font-weight="700">⚠️ Example Cross-Door Entry:</text>
+            <text x="28" y="200" fill="#cbd5e1" font-size="10.5">AI reads an untrusted GitHub issue or web ticket via</text>
+            <text x="28" y="215" fill="#cbd5e1" font-size="10.5">an external MCP server → marks session TAINTED_HIGH.</text>
+
+            <!-- Center Box: Shared Brain (.mcp-cage/taint.db) -->
+            <rect x="385" y="18" width="290" height="214" rx="12" fill="#13102b" stroke="#38bdf8" stroke-width="2"/>
+            <text x="415" y="42" fill="#7dd3fc" font-size="13" font-weight="800">🧠 ONE SHARED SECURITY BRAIN</text>
+            <text x="435" y="60" fill="#bae6fd" font-size="11" font-family="monospace">.mcp-cage/taint.db (SQLite WAL)</text>
+
+            <rect x="401" y="72" width="258" height="72" rx="8" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+            <text x="413" y="91" fill="#e0e7ff" font-size="11" font-weight="700">Synchronized Across Both Doors (&lt;0.5ms):</text>
+            <text x="413" y="108" fill="#c7d2fe" font-size="10.5">1. Session Taint Level (CLEAN → TAINTED_HIGH)</text>
+            <text x="413" y="123" fill="#c7d2fe" font-size="10.5">2. Sensitive File Exposure (sensitive_read=1)</text>
+            <text x="413" y="138" fill="#c7d2fe" font-size="10.5">3. All 34 CWE Guards &amp; Workspace Lease</text>
+
+            <rect x="401" y="154" width="258" height="66" rx="8" fill="#2a0a12" stroke="#ef4444" stroke-width="1.4"/>
+            <text x="413" y="173" fill="#fca5a5" font-size="11" font-weight="800">🚫 Cross-Door Attack Blocked!</text>
+            <text x="413" y="190" fill="#fecaca" font-size="10.5">Poison enters Door 1 → tries to run Bash</text>
+            <text x="413" y="205" fill="#fecaca" font-size="10.5">in Door 2 (or read .env in Door 2 → leak</text>
+            <text x="413" y="217" fill="#fecaca" font-size="10.5">via Slack in Door 1) → STOPPED COLD.</text>
+
+            <!-- Right Box: Door 2 / Plane B -->
+            <rect x="711" y="14" width="335" height="222" rx="10" fill="#1b102e" stroke="#a855f7" stroke-width="1.8"/>
+            <text x="725" y="38" fill="#e9d5ff" font-size="13" font-weight="800">🚪 DOOR 2 · PLANE B: Built-In Native Agent Tools</text>
+            <text x="725" y="56" fill="#d8b4fe" font-size="11">Tools built directly into Claude Code, Cursor, Gemini, agy:</text>
+            <text x="725" y="76" fill="#e2e8f0" font-size="11">• Native Bash / Terminal  • Built-in Read / Write / Edit</text>
+            <text x="725" y="93" fill="#e2e8f0" font-size="11">• Built-in WebFetch / Curl • Subagent Task Spawning</text>
+            <rect x="723" y="108" width="311" height="54" rx="7" fill="#2e1065" stroke="#a855f7" stroke-width="1.2"/>
+            <text x="733" y="127" fill="#e9d5ff" font-size="11" font-weight="800">🛡️ Protected by: mcp-cage hook (Pre/Post Lifecycle Hooks)</text>
+            <text x="733" y="144" fill="#f3e8ff" font-size="10.5">Runs before &amp; after every native tool call: inspects</text>
+            <text x="733" y="157" fill="#f3e8ff" font-size="10.5">shell ASTs, blocks tainted Bash/exfil, guards .git/hooks</text>
+            <text x="725" y="184" fill="#fca5a5" font-size="10.5" font-weight="700">⚠️ Example Cross-Door Exit Blocked:</text>
+            <text x="725" y="200" fill="#cbd5e1" font-size="10.5">Hijacked AI tries to run native Bash `curl` or overwrite</text>
+            <text x="725" y="215" fill="#cbd5e1" font-size="10.5">`.mcp.json` → Door 2 reads taint.db &amp; blocks execution!</text>
+
+            <!-- Bidirectional arrows between Door 1, Brain, and Door 2 -->
+            <line x1="349" y1="95" x2="383" y2="95" stroke="#10b981" stroke-width="2.2" marker-end="url(#paArrowGreen)"/>
+            <line x1="383" y1="125" x2="349" y2="125" stroke="#10b981" stroke-width="2.2" marker-end="url(#paArrowGreen)"/>
+            <line x1="711" y1="95" x2="677" y2="95" stroke="#a855f7" stroke-width="2.2" marker-end="url(#paArrowPurple)"/>
+            <line x1="677" y1="125" x2="711" y2="125" stroke="#a855f7" stroke-width="2.2" marker-end="url(#paArrowPurple)"/>
+          </svg>
         </div>
       </div>
 
