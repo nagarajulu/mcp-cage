@@ -5,6 +5,33 @@ All notable changes to `mcp-cage` are documented in this file.
 
 ---
 
+## [0.4.2] — 2026-11-22
+
+### Added — 7-Vector MCP Server Source-to-Sink 0-Day Scanner (`audit-server`), Live Differential Boundary Prober (`probe-live`), Inbound Response & Reverse-Channel Firewall, Cross-Turn Salami-Slice Circuit Breaker & SHA-256 Hash-Chained Audit Ledger
+1. **7-Vector Python AST & TypeScript MCP Server Source-to-Sink 0-Day Vulnerability Scanner (`MCPServerSourceAuditor` / `mcp-cage audit-server <path> [--format json|sarif]`)**
+   - Traces untrusted MCP tool/resource parameters (`@mcp.tool()`, `@server.call_tool()`, TypeScript `server.tool(...)`) directly into 7 critical sink classes with dominance-aware sanitizer recognition (`0.0%` false positives on properly guarded code):
+     1. `MCP_SINK_CMD_INJECTION` (`CWE-78`): `subprocess.*(..., shell=True)`, `os.system`, `os.popen`, `asyncio.create_subprocess_shell`, TS `child_process.exec`/`execSync`.
+     2. `MCP_SINK_PATH_TRAVERSAL` (`CWE-22`): Unconfined `open()`, `Path.read_text/write_text`, `os.path.join`, TS `fs.readFile/writeFile` without `.resolve().relative_to()` or `os.path.commonpath`.
+     3. `MCP_SINK_SQL_INJECTION` (`CWE-89`): Raw f-string/format/`%` SQL interpolation into `.execute()`.
+     4. `MCP_SINK_UNVALIDATED_SSRF` (`CWE-918`): Unvalidated `requests.*`, `httpx.*`, `urllib.request.urlopen` without IP/IMDS filtering.
+     5. `MCP_SINK_UNSAFE_DESERIALIZATION_EVAL` (`CWE-94` / `CWE-502`): `eval()`, `exec()`, `pickle.loads()`, `yaml.load()` without `SafeLoader`.
+     6. `MCP_TRANSPORT_UNAUTH_BIND_REBINDING` (`CWE-346` — `CVE-2025-66416` class): Unauthenticated `0.0.0.0` transport binds without DNS-rebinding `Host`/`Origin` middleware.
+     7. `MCP_OAUTH_CONFUSED_DEPUTY` (`CWE-863`): Raw `access_token` / `bearer_token` parameters accepted directly in LLM tool schemas.
+   - Emits standards-compliant **SARIF v2.1.0** (`--format sarif`) and synthesizes deterministic JSON-RPC `tools/call` PoC payloads (`poc_jsonrpc`).
+2. **Live Black-Box / Grey-Box MCP Server Schema Introspector & Non-Destructive Canary Boundary Prober (`LiveMCPServerProber` / `mcp-cage probe-live -- <cmd...>`)**
+   - Spawns any stdio MCP server inside a temporary canary workspace, performs the JSON-RPC `initialize` $\rightarrow$ `tools/list` handshake, scores live schemas with `WireDIFCCanonicalizer`, and executes side-effect-free differential boundary probes to identify `CWE-209` stack-trace and SQL syntax error oracles.
+3. **Inbound Response & Server-to-Client Reverse-Channel Firewall (`WirePayloadSanitizer.sanitize_untrusted_inbound_text` + `MCPWireGateway.process_server_to_client`)**
+   - Neutralizes zero-click external Markdown image exfiltration beacons (`![...](https://...)`), active HTML `<img>`/`<iframe>`/`<script>` tags, and spoofed ChatML/XML turn-closing role delimiters (`</tool_result>`, `<|im_start|>system`, `<|endoftext|>`) inside untrusted `tools/call` and external `resources/read` responses.
+   - Blocks server-initiated `roots/list` host reconnaissance when tainted, `elicitation/create` credential-phishing prompts (`api_key`, `password`, `otp`), and `sampling/createMessage` with `includeContext: "allServers"` or injected system prompts even on Turn 1.
+4. **Cross-Turn Salami-Slice Chunked Exfiltration Circuit Breaker (`SessionTaintStateMachine.check_and_record_cross_turn_egress`)**
+   - Tracks rolling per-domain short token concatenation across turns in SQLite WAL (`domain_egress_ledger`), defeating multi-turn 4–12 byte chunked hex/base32/base64 DNS or URL query/path exfiltration that stays below single-call length/entropy thresholds.
+5. **Plane A + Plane B Wire-DIFC Parity, Imperative Line-Span Provenance & Subagent (`Task`) Taint Inheritance (`propagate_taint_to_subagent`)**
+   - Unifies `PersistentLineSpanProvenance`, `is_covert_exfil_identifier`, and `check_and_record_cross_turn_egress` across both Plane A and Plane B (`handle_cli_hook`), records imperative natural-language lines written during `UNTRUSTED` turns, and propagates session taint across subagent (`Task` / `invoke_subagent` / `spawn_agent`) handoffs (`CWE-269`).
+6. **Cryptographic SHA-256 / HMAC-SHA256 Hash-Chained Audit Ledger (`SessionTaintStateMachine.verify_audit_ledger` / `mcp-cage verify-audit`)**
+   - Chains every `audit.jsonl` record with `seq`, `args_sha256`, `prev_hash`, and `entry_hash` (`SHA-256` or `HMAC-SHA256` via `MCP_CAGE_AUDIT_KEY`) and verifies chain integrity from genesis to head.
+
+---
+
 ## [0.4.1] — 2026-11-19
 
 ### Added — Modular `mcp_cage/` Package Architecture, Declarative Policy Loader & 25-Mechanism CWE Paired-Twin Matrix

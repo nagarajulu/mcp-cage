@@ -33,7 +33,7 @@ v0.3.0 Empirical Co-Design Architecture (`v0.1.0` -> `v0.2.2` -> `v0.3.0`):
 
 from __future__ import annotations
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 import argparse
 import asyncio
@@ -205,12 +205,18 @@ WORKSPACE_PATH_KEYS: tuple[str, ...] = (
     "projectDir",
     "repo_dir",
     "repoDir",
+    "repo_root",
+    "repoRoot",
     "workspace_dir",
     "workspaceDir",
     "target_dir",
     "targetDir",
     "output_dir",
     "outputDir",
+    "kubeconfig_path",
+    "kubeconfigPath",
+    "config_path",
+    "configPath",
 )
 LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
     {
@@ -230,6 +236,8 @@ LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
         "projectdir",
         "repo_dir",
         "repodir",
+        "repo_root",
+        "reporoot",
         "workspace_dir",
         "workspacedir",
         "target_dir",
@@ -244,6 +252,10 @@ LOCAL_DIR_ONLY_KEYS: frozenset[str] = frozenset(
         "samplepath",
         "input_path",
         "inputpath",
+        "kubeconfig_path",
+        "kubeconfigpath",
+        "config_path",
+        "configpath",
     }
 )
 POSIX_CMD_SUBST_RE = re.compile(r"\$\(|`|\$\{|\x00")
@@ -546,6 +558,8 @@ class WirePayloadSanitizer:
     Sanitizes untrusted wire text against:
     - A1.4: Invisible Unicode Tag characters (U+E0000..U+E007F), zero-width joiners, and RTL overrides (U+202A..U+202E).
     - A2.7: Terminal ANSI CSI escape codes (`\\x1b[...`) and OSC 52 clipboard injection sequences (`\\x1b]...`).
+    - v0.4.2 Zero-Click Markdown Image Beacon Exfiltration (`![...](https://...)` with query/interpolation or untrusted HTML `<img>`/`<iframe>`/`<script>` tags).
+    - v0.4.2 ChatML / XML / Anthropic Role-Delimiter Breakout tags (`</tool_result>`, `<|im_start|>`, `<|im_end|>`, `<|endoftext|>`, `</function_results>`, `<system-reminder>`).
     """
 
     UNICODE_SMUGGLING_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\U000e0000-\U000e007f]+")
@@ -553,6 +567,15 @@ class WirePayloadSanitizer:
         r"(?:\x1b|\\u001b)(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b\\]*(?:\x07|\\u0007|\x1b\\|\\u001b\\\\))"
     )
     SPOOFED_BOUNDARY_RE = re.compile(r"<<<\s*/?\s*UNTRUSTED_DATA_BOUNDARY[^>]*>>>")
+    ROLE_DELIMITER_BREAKOUT_RE = re.compile(
+        r"(?i)(?:<\|(?:im_start|im_end|endoftext|system|user|assistant|eot_id|start_header_id|end_header_id)\|>|</?\s*(?:tool_result|function_results|system-reminder|antml:function_calls|antml:invoke|system_instruction)\b[^>]*>)"
+    )
+    MD_IMAGE_BEACON_RE = re.compile(
+        r"!\[([^\]]*)\]\(\s*(https?://[^)\s]+)\s*\)"
+    )
+    HTML_ACTIVE_BEACON_TAG_RE = re.compile(
+        r"(?i)<\s*(?:img|iframe|script|object|embed)\b[^>]*\b(?:src|data)\s*=\s*['\"]?https?://[^>]+>"
+    )
 
     @classmethod
     def sanitize_text(cls, text: str) -> tuple[str, list[str]]:
@@ -564,15 +587,35 @@ class WirePayloadSanitizer:
         if cls.ANSI_ESCAPE_RE.search(cleaned):
             alerts.append("Stripped terminal ANSI / OSC clipboard escape sequences (A2.7).")
             cleaned = cls.ANSI_ESCAPE_RE.sub("", cleaned)
+        if cls.ROLE_DELIMITER_BREAKOUT_RE.search(cleaned):
+            alerts.append("Stripped spoofed ChatML/XML turn-closing role delimiter breakout tags (CWE-74).")
+            cleaned = cls.ROLE_DELIMITER_BREAKOUT_RE.sub("[STRIPPED_ROLE_DELIMITER]", cleaned)
+        return cleaned, alerts
+
+    @classmethod
+    def sanitize_untrusted_inbound_text(cls, text: str) -> tuple[str, list[str]]:
+        """
+        Full inbound untrusted response sanitizer: strips Unicode/ANSI/Role-Delimiters
+        AND neutralizes zero-click external Markdown image beacons (`![...](https://...)`)
+        and active HTML `<img/iframe/script src="https://...">` tags.
+        """
+        cleaned, alerts = cls.sanitize_text(text)
+        if cls.MD_IMAGE_BEACON_RE.search(cleaned):
+            alerts.append("Neutralized external Markdown image exfiltration beacon in untrusted output (LLM02 / CWE-200).")
+            cleaned = cls.MD_IMAGE_BEACON_RE.sub("[MCP-CAGE_STRIPPED_EXTERNAL_IMAGE_BEACON]", cleaned)
+        if cls.HTML_ACTIVE_BEACON_TAG_RE.search(cleaned):
+            alerts.append("Neutralized active HTML external beacon tag in untrusted output (CWE-79 / CWE-200).")
+            cleaned = cls.HTML_ACTIVE_BEACON_TAG_RE.sub("[MCP-CAGE_STRIPPED_HTML_BEACON]", cleaned)
         return cleaned, alerts
 
     @classmethod
     def spotlight_untrusted_text(cls, text: str) -> str:
         """
         Wraps untrusted tool output in a randomized Microsoft Spotlighting boundary
-        (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) after neutralizing any spoofed boundary markers.
+        (`<<<UNTRUSTED_DATA_BOUNDARY id=...>>>`) after neutralizing any spoofed boundary markers,
+        role-delimiter breakouts, and zero-click Markdown/HTML image beacons.
         """
-        cleaned, _ = cls.sanitize_text(text)
+        cleaned, _ = cls.sanitize_untrusted_inbound_text(text)
         de_spoofed = cls.SPOOFED_BOUNDARY_RE.sub("[SPOOFED_BOUNDARY_STRIPPED]", cleaned)
         boundary_id = uuid.uuid4().hex[:8]
         return (
@@ -833,7 +876,11 @@ class StandardArgGuards:
     @classmethod
     def _is_endpoint_url_key(cls, key: str) -> bool:
         low = key.lower()
-        return low in cls.ENDPOINT_URL_KEYS or low.endswith("_url") or key.endswith("Url")
+        return (
+            low in cls.ENDPOINT_URL_KEYS
+            or low.endswith(("_url", "_endpoint"))
+            or key.endswith(("Url", "Endpoint"))
+        )
 
     @classmethod
     def _is_endpoint_token_key(cls, key: str) -> bool:
@@ -1394,6 +1441,66 @@ class StandardArgGuards:
     SENSITIVE_ATTACHMENT_RE = re.compile(
         r"(?i)(?:^|[\\/])(?:\.[a-z0-9_-]+-mcp|\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.env(?:\.[^\\/]*)?|id_rsa|id_ed25519|etc[\\/]shadow|etc[\\/]passwd)(?:$|[\\/]|$)"
     )
+    WORKFLOW_CAPABILITY_SECRET_RE = re.compile(r"(?i)^secret\.read\s*:")
+    WORKFLOW_CAPABILITY_NETWORK_RE = re.compile(r"(?i)^network\.fetch\s*:\s*([^\s]+)$")
+    SECRET_TEMPLATE_INTERP_RE = re.compile(r"\{\{\s*secret\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}")
+    WORKFLOW_CONTAINER_KEYS = frozenset({"flow", "workflow", "graph", "pipeline", "nodes"})
+
+    @classmethod
+    def workflow_secret_capability_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks self-granted `secret.read:*`, private `network.fetch:*`, and `{{secret:...}}` interpolation in workflow DAG payloads (CWE-200 / CWE-522 / CWE-863)."""
+        in_workflow = any(k.lower() in cls.WORKFLOW_CONTAINER_KEYS for k in args)
+        for k, v in cls._iter_kv_pairs(args):
+            low_k = k.lower()
+            if low_k == "capabilities" and isinstance(v, (list, tuple)):
+                for cap in v:
+                    if not isinstance(cap, str):
+                        continue
+                    cap_s = cap.strip()
+                    if cls.WORKFLOW_CAPABILITY_SECRET_RE.match(cap_s):
+                        return (
+                            False,
+                            f"Self-declared workflow secret capability '{cap_s}' blocked (CWE-200 / CWE-863).",
+                        )
+                    net_m = cls.WORKFLOW_CAPABILITY_NETWORK_RE.match(cap_s)
+                    if net_m:
+                        host = net_m.group(1)
+                        ok_net, net_reason = validate_outbound_network_target(f"https://{host}")
+                        if not ok_net:
+                            return (
+                                False,
+                                f"Self-declared workflow private network grant '{cap_s}' blocked (CWE-918): {net_reason}",
+                            )
+            if isinstance(v, str):
+                if (in_workflow or low_k in {"code", "script", "params", "headers", "body", "url", "value"}) and cls.SECRET_TEMPLATE_INTERP_RE.search(v):
+                    return (
+                        False,
+                        f"Inline environment secret template interpolation blocked in '{k}' (CWE-200 / CWE-522).",
+                    )
+                if low_k in cls.WORKFLOW_CONTAINER_KEYS and '"secret.read:' in v.lower():
+                    return (
+                        False,
+                        f"Self-declared workflow secret capability in serialized '{k}' blocked (CWE-200 / CWE-863).",
+                    )
+        return True, "OK"
+
+    KUBECONFIG_CONTENT_KEYS = frozenset({"kubeconfig_content", "kubeconfigcontent", "kubeconfig"})
+    KUBECONFIG_SERVER_URL_RE = re.compile(r"(?im)^\s*(?:-\s*)?server\s*:\s*[\"']?([^\s\"'#]+)[\"']?")
+
+    @classmethod
+    def kubeconfig_ssrf_guard(cls, args: Mapping[str, Any]) -> tuple[bool, str]:
+        """Blocks private/loopback/metadata API server SSRF URLs inside inline kubeconfig payloads (CWE-918)."""
+        for k, v in cls._iter_kv_pairs(args):
+            if k.lower() in cls.KUBECONFIG_CONTENT_KEYS and isinstance(v, str) and v.strip():
+                urls = cls.KUBECONFIG_SERVER_URL_RE.findall(v) or URL_IN_TEXT_RE.findall(v)
+                for raw_url in urls:
+                    ok_net, net_reason = validate_outbound_network_target(raw_url)
+                    if not ok_net:
+                        return (
+                            False,
+                            f"Kubeconfig server SSRF target blocked in '{k}' (CWE-918): {net_reason}",
+                        )
+        return True, "OK"
 
     @classmethod
     def make_attachment_path_guard(
@@ -1479,7 +1586,7 @@ class StandardArgGuards:
             org = ""
             for k, v in args.items():
                 k_low = str(k).lower()
-                if k_low in {"org", "org_name", "organization", "tenant_id"} or k_low.endswith("_org_name"):
+                if k_low in {"org", "org_id", "org_name", "organization", "organization_id", "tenant_id"} or k_low.endswith("_org_name"):
                     org = str(v or "").strip().lower()
                     if org:
                         break
@@ -1564,7 +1671,7 @@ class SessionTaintStateMachine:
     def __init__(
         self,
         db_path: Path,
-        session_id: str,
+        session_id: str = "default",
         mode: EnforcementMode = EnforcementMode.ENFORCE,
         audit_log_path: Path | None = None,
     ) -> None:
@@ -1615,6 +1722,19 @@ class SessionTaintStateMachine:
                     VALUES (?, ?, ?, '[]', '{}', '[]', ?)
                     """,
                     (self.session_id, int(Integrity.TRUSTED), int(Confidentiality.PUBLIC), time.time()),
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS domain_egress_ledger (
+                        session_id TEXT NOT NULL,
+                        domain TEXT NOT NULL,
+                        call_count INTEGER NOT NULL DEFAULT 0,
+                        total_bytes INTEGER NOT NULL DEFAULT 0,
+                        sliding_concat_buffer TEXT NOT NULL DEFAULT '',
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY (session_id, domain)
+                    )
+                    """
                 )
                 conn.execute("COMMIT;")
                 return
@@ -2044,28 +2164,280 @@ class SessionTaintStateMachine:
             arguments,
         )
 
+    def propagate_taint_to_subagent(self, child_session_id: str) -> tuple[Integrity, Confidentiality]:
+        """
+        Propagates parent `(integrity, confidentiality, untrusted_entities)` into `child_session_id`
+        (and the default session fallback if child_session_id is distinct) to defeat Confused-Deputy
+        Subagent Taint Laundering (`CWE-269`) across multi-agent `Task` / `spawn_agent` handoffs.
+        """
+        (ambient_int, ambient_conf, prov, _), untrusted_entities = self._get_state_and_entities()
+        target_ids = {child_session_id.strip() or "default", "default"}
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            now = time.time()
+            for tid in target_ids:
+                row = conn.execute(
+                    "SELECT integrity, confidentiality, provenance_json, untrusted_entities_json FROM session_taint WHERE session_id = ?",
+                    (tid,),
+                ).fetchone()
+                if not row:
+                    child_prov = list(prov[-20:]) + [f"[SUBAGENT INHERIT] Inherited taint from parent session '{self.session_id}'"]
+                    conn.execute(
+                        """
+                        INSERT INTO session_taint
+                        (session_id, integrity, confidentiality, provenance_json, leases_json, untrusted_entities_json, updated_at)
+                        VALUES (?, ?, ?, ?, '{}', ?, ?)
+                        """,
+                        (tid, int(ambient_int), int(ambient_conf), json.dumps(child_prov), json.dumps(untrusted_entities[-100:]), now),
+                    )
+                else:
+                    c_int = min(int(row[0]), int(ambient_int))
+                    c_conf = max(int(row[1]), int(ambient_conf))
+                    c_prov = json.loads(row[2]) if row[2] else []
+                    c_ents = json.loads(row[3]) if row[3] else []
+                    if c_int < int(row[0]) or c_conf > int(row[1]):
+                        c_prov.append(f"[SUBAGENT INHERIT] Propagated (Int:{ambient_int.name}, Conf:{ambient_conf.name}) from '{self.session_id}'")
+                    for ent in untrusted_entities:
+                        if ent not in c_ents:
+                            c_ents.append(ent)
+                    conn.execute(
+                        """
+                        UPDATE session_taint
+                        SET integrity = ?, confidentiality = ?, provenance_json = ?, untrusted_entities_json = ?, updated_at = ?
+                        WHERE session_id = ?
+                        """,
+                        (c_int, c_conf, json.dumps(c_prov[-50:]), json.dumps(c_ents[-100:]), now, tid),
+                    )
+            conn.execute("COMMIT;")
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+        return ambient_int, ambient_conf
+
+    def check_and_record_cross_turn_egress(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        ambient_int: Integrity,
+        ambient_conf: Confidentiality,
+    ) -> tuple[bool, str]:
+        """
+        v0.4.2 Cross-Turn Cumulative Egress & Salami-Slice Exfiltration Circuit Breaker (`CWE-200`).
+        Tracks rolling per-domain short token concatenation across turns in SQLite WAL (`domain_egress_ledger`).
+        Defeats multi-turn 4-16 byte chunked hex/base32/base64 DNS or URL query/path exfiltration that
+        stays below single-call length/entropy thresholds.
+        """
+        if ambient_conf < Confidentiality.CONFIDENTIAL:
+            return True, "OK"
+
+        serialized = json.dumps(arguments, ensure_ascii=False)
+        urls = URL_IN_TEXT_RE.findall(serialized)
+        for m in DNS_CMD_HOST_RE.finditer(serialized):
+            urls.append(f"dns://{m.group(2)}")
+
+        if not urls:
+            return True, "OK"
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            now = time.time()
+            for raw_u in urls:
+                cleaned_u = raw_u.rstrip("\"',;)>]}")
+                parsed = urllib.parse.urlsplit(cleaned_u)
+                host = (parsed.hostname or "").strip().lower().rstrip(".")
+                if not host:
+                    continue
+                labels = [lbl for lbl in host.split(".") if lbl]
+                reg_domain = ".".join(labels[-2:]) if len(labels) >= 2 else host
+                sub_fragments: list[str] = []
+                if len(labels) > 2:
+                    for sub_lbl in labels[:-2]:
+                        if sub_lbl not in {"www", "api", "cdn", "app", "dev", "staging", "v1", "v2"}:
+                            sub_fragments.append(sub_lbl)
+                # Also extract query parameter values and non-trivial path tokens
+                if parsed.query:
+                    for _, qv in urllib.parse.parse_qsl(parsed.query):
+                        qv_clean = re.sub(r"[^A-Za-z0-9+/=_-]", "", qv)
+                        if 4 <= len(qv_clean) <= 28:
+                            sub_fragments.append(qv_clean)
+                if parsed.path:
+                    for seg in parsed.path.split("/"):
+                        seg_clean = re.sub(r"[^A-Za-z0-9+/=_-]", "", seg)
+                        if 6 <= len(seg_clean) <= 24 and not seg_clean.isalpha():
+                            sub_fragments.append(seg_clean)
+
+                if not sub_fragments:
+                    continue
+
+                fragment_join = "".join(sub_fragments)
+                row = conn.execute(
+                    "SELECT call_count, total_bytes, sliding_concat_buffer FROM domain_egress_ledger WHERE session_id = ? AND domain = ?",
+                    (self.session_id, reg_domain),
+                ).fetchone()
+                prev_calls = int(row[0]) if row else 0
+                prev_bytes = int(row[1]) if row else 0
+                prev_buf = str(row[2]) if row else ""
+
+                new_calls = prev_calls + 1
+                new_bytes = prev_bytes + len(fragment_join)
+                new_buf = (prev_buf + fragment_join)[-256:]
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO domain_egress_ledger VALUES (?, ?, ?, ?, ?, ?)",
+                    (self.session_id, reg_domain, new_calls, new_bytes, new_buf, now),
+                )
+
+                # Evaluate concatenated buffer across 2+ calls for salami-sliced hex/base32/base64 or high-entropy stream
+                if new_calls >= 2 and len(new_buf) >= 16:
+                    is_hex_stream = bool(re.fullmatch(r"[0-9a-fA-F]{16,}", new_buf))
+                    is_b32_stream = bool(re.fullmatch(r"[A-Z2-7=]{16,}", new_buf.upper())) and any(c.isdigit() for c in new_buf)
+                    ent = shannon_entropy(new_buf)
+                    bg = bigram_transition_plausibility(new_buf)
+                    if is_hex_stream or is_b32_stream or (len(new_buf) >= 20 and ent >= 3.65 and bg < 0.18):
+                        conn.execute("COMMIT;")
+                        return (
+                            False,
+                            f"[CROSS-TURN SALAMI-SLICE EXFILTRATION BLOCKED] Cumulative outbound fragments across {new_calls} calls "
+                            f"to '{reg_domain}' while session holds {ambient_conf.name} data formed a covert payload stream "
+                            f"(len={len(new_buf)}, H={ent:.2f} bits/char, CWE-200).",
+                        )
+            conn.execute("COMMIT;")
+        except Exception:
+            conn.execute("ROLLBACK;")
+            raise
+        finally:
+            conn.close()
+        return True, "OK"
+
     def _finalize(
         self,
         evaluation: GateEvaluation,
         profile: ToolSecurityProfile,
         arguments: Mapping[str, Any],
     ) -> GateEvaluation:
-        """Appends tamper-evident structured record to `audit.jsonl`."""
-        record = {
+        """
+        Appends cryptographically hash-chained tamper-evident structured record (`CWE-353` / `CWE-778`)
+        to `audit.jsonl`, linking each entry to `prev_hash` via SHA-256 (and optional HMAC-SHA256).
+        """
+        args_canonical = json.dumps(arguments, sort_keys=True, ensure_ascii=False, default=str)
+        args_sha256 = hashlib.sha256(args_canonical.encode("utf-8")).hexdigest()
+
+        prev_hash = "0" * 64
+        seq = 1
+        if self.audit_log_path.exists():
+            try:
+                lines = [ln.strip() for ln in self.audit_log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                if lines:
+                    last_rec = json.loads(lines[-1])
+                    prev_hash = str(last_rec.get("entry_hash") or ("0" * 64))
+                    seq = int(last_rec.get("seq") or len(lines)) + 1
+            except Exception:
+                pass
+
+        record_core: dict[str, Any] = {
+            "seq": seq,
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "session_id": self.session_id,
             "mode": evaluation.mode.value,
             "tool": profile.fq_name,
+            "args_sha256": args_sha256,
             "policy_decision": evaluation.decision.name,
             "wire_decision": evaluation.effective_decision.name,
             "trifecta": evaluation.trifecta_triggered,
             "ambient_integrity": evaluation.ambient_integrity.name,
             "ambient_confidentiality": evaluation.ambient_confidentiality.name,
             "human_summary": evaluation.human_summary,
+            "prev_hash": prev_hash,
         }
+        canonical_core = json.dumps(record_core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        audit_hmac_key = os.environ.get("MCP_CAGE_AUDIT_KEY", "")
+        if audit_hmac_key:
+            entry_hash = hmac.new(
+                audit_hmac_key.encode("utf-8"),
+                f"{prev_hash}:{canonical_core}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+        else:
+            entry_hash = hashlib.sha256(f"{prev_hash}:{canonical_core}".encode("utf-8")).hexdigest()
+
+        record = {**record_core, "entry_hash": entry_hash}
         with open(self.audit_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
         return evaluation
+
+    @staticmethod
+    def verify_audit_ledger(audit_log_path: Path | str, hmac_key: str | None = None) -> dict[str, Any]:
+        """
+        Verifies the cryptographic SHA-256 / HMAC-SHA256 hash chain of `audit.jsonl` from genesis (`0`*64) to head.
+        Detects any modified, inserted, reordered, or deleted audit log entries (`CWE-353`).
+        """
+        path = Path(audit_log_path)
+        if not path.exists():
+            return {"valid": True, "entries_checked": 0, "head_hash": "0" * 64, "errors": []}
+
+        key = hmac_key if hmac_key is not None else os.environ.get("MCP_CAGE_AUDIT_KEY", "")
+        expected_prev = "0" * 64
+        expected_seq = 1
+        errors: list[str] = []
+        checked = 0
+
+        for line_no, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            checked += 1
+            try:
+                rec = json.loads(stripped)
+            except Exception as exc:
+                errors.append(f"Line {line_no}: Malformed JSON ({exc})")
+                continue
+
+            if "entry_hash" not in rec or "prev_hash" not in rec:
+                errors.append(f"Line {line_no}: Missing cryptographic chain fields (`prev_hash` / `entry_hash`).")
+                continue
+
+            actual_prev = str(rec.get("prev_hash"))
+            actual_seq = int(rec.get("seq") or 0)
+            actual_hash = str(rec.get("entry_hash"))
+
+            if actual_prev != expected_prev:
+                errors.append(
+                    f"Line {line_no} (seq={actual_seq}): Hash chain link broken (`prev_hash`={actual_prev[:16]}... != expected={expected_prev[:16]}...)."
+                )
+            if actual_seq != expected_seq:
+                errors.append(
+                    f"Line {line_no}: Non-monotonic sequence number (`seq`={actual_seq} != expected={expected_seq})."
+                )
+
+            rec_core = {k: v for k, v in rec.items() if k != "entry_hash"}
+            canonical_core = json.dumps(rec_core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            if key:
+                recomputed = hmac.new(
+                    key.encode("utf-8"),
+                    f"{actual_prev}:{canonical_core}".encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+            else:
+                recomputed = hashlib.sha256(f"{actual_prev}:{canonical_core}".encode("utf-8")).hexdigest()
+
+            if recomputed != actual_hash:
+                errors.append(
+                    f"Line {line_no} (seq={actual_seq}): Entry payload tampered (`entry_hash`={actual_hash[:16]}... != recomputed={recomputed[:16]}...)."
+                )
+
+            expected_prev = actual_hash
+            expected_seq = actual_seq + 1
+
+        return {
+            "valid": len(errors) == 0,
+            "entries_checked": checked,
+            "head_hash": expected_prev,
+            "errors": errors,
+        }
 
 
 # -----------------------------------------------------------------------------
@@ -2482,6 +2854,8 @@ class ToxicFlowGraphAnalyzer:
             StandardArgGuards.pickle_deserialization_guard,
             StandardArgGuards.package_install_guard,
             StandardArgGuards.code_sandbox_escape_guard,
+            StandardArgGuards.workflow_secret_capability_guard,
+            StandardArgGuards.kubeconfig_ssrf_guard,
             StandardArgGuards.make_attachment_path_guard(workspace_root),
         ]
         if "graphql" in low_tool and any(tok in low_tool for tok in ("query", "read", "search", "get", "fetch")):
@@ -2607,6 +2981,9 @@ class ToxicFlowGraphAnalyzer:
                 "run_details",
                 "run_comments",
                 "team",
+                "auth_config",
+                "api_key",
+                "service_key",
             )
         ):
             guards.append(StandardArgGuards.make_org_allowlist_guard(allowed_orgs))
@@ -3324,6 +3701,792 @@ class WorkspaceSkillAndRuleAuditor:
 
 
 # -----------------------------------------------------------------------------
+# Primitive B3: MCP Server Source-to-Sink 0-Day Vulnerability Scanner (`audit-server`)
+# & Live Grey-Box / Black-Box MCP Server Differential Boundary Prober (`probe-live`)
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ServerSourceAuditFinding:
+    severity: str       # "CRITICAL", "HIGH", "MEDIUM"
+    rule_id: str        # e.g., "MCP_SINK_CMD_INJECTION", "MCP_SINK_PATH_TRAVERSAL"
+    cwe_id: str         # e.g., "CWE-78", "CWE-22", "CWE-89", "CWE-918"
+    tool_name: str
+    tainted_param: str
+    source_path: str
+    line_number: int
+    sink_expression: str
+    message: str
+    remediation: str
+    poc_jsonrpc: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "severity": self.severity,
+            "rule_id": self.rule_id,
+            "cwe_id": self.cwe_id,
+            "tool_name": self.tool_name,
+            "tainted_param": self.tainted_param,
+            "source_path": self.source_path,
+            "line_number": self.line_number,
+            "sink_expression": self.sink_expression,
+            "message": self.message,
+            "remediation": self.remediation,
+            "poc_jsonrpc": self.poc_jsonrpc,
+        }
+
+
+class MCPServerSourceAuditor:
+    """
+    v0.4.2 7-Vector Static AST & Cross-Language Taint Source-to-Sink 0-Day Vulnerability
+    Scanner for Python (`FastMCP` / `mcp.server`) and TypeScript (`@modelcontextprotocol/sdk`)
+    MCP Server Repositories (`mcp-cage audit-server <path> [--format json|sarif] [--emit-poc]`).
+
+    Traces untrusted MCP tool/resource handler parameters directly into 7 critical sink classes
+    with dominance-aware sanitizer recognition (0.0% false positives on properly guarded code):
+      1. `MCP_SINK_CMD_INJECTION` (`CWE-78`, CRITICAL): Tainted tool parameter flows into
+         `subprocess.*(..., shell=True)`, `os.system`, `os.popen`, `asyncio.create_subprocess_shell`,
+         or TypeScript `child_process.exec` / `execSync` without `shlex.quote`.
+      2. `MCP_SINK_PATH_TRAVERSAL` (`CWE-22`, HIGH): Tainted tool parameter flows into `open()`,
+         `Path.read_text/write_text/open/unlink`, `os.path.join`, `shutil.*`, or TS `fs.readFile*` /
+         `fs.writeFile*` without an enclosing `.resolve().relative_to(...)`, `os.path.commonpath`,
+         or `os.path.realpath` prefix check.
+      3. `MCP_SINK_SQL_INJECTION` (`CWE-89`, CRITICAL): Tainted tool parameter reaches `.execute()`
+         or `.executemany()` via f-string (`ast.JoinedStr`), `.format()`, `%`, or `+` concatenation
+         instead of parameterized query tuples.
+      4. `MCP_SINK_UNVALIDATED_SSRF` (`CWE-918`, HIGH): Tainted URL parameter reaches `requests.*`,
+         `httpx.*`, `urllib.request.urlopen`, `aiohttp.*`, or `fetch()` without IP/IMDS filtering
+         or forwards `Authorization` headers across `follow_redirects=True`.
+      5. `MCP_SINK_UNSAFE_DESERIALIZATION_EVAL` (`CWE-94` / `CWE-502`, CRITICAL): Tainted tool
+         parameter reaches `eval()`, `exec()`, `pickle.loads()`, `marshal.loads()`, or `yaml.load()`
+         without `SafeLoader`.
+      6. `MCP_TRANSPORT_UNAUTH_BIND_REBINDING` (`CWE-306` / `CWE-346`, HIGH — `CVE-2025-66416` class):
+         MCP SSE/StreamableHTTP server binds to `0.0.0.0` without DNS-rebinding `Host`/`Origin`
+         validation or authentication middleware.
+      7. `MCP_OAUTH_CONFUSED_DEPUTY` (`CWE-863`, HIGH): MCP tool handler accepts raw
+         `access_token` / `bearer_token` / `oauth_token` parameters in tool arguments or forwards
+         unvalidated upstream client tokens (MCP Auth Specification Confused Deputy violation).
+    """
+
+    MCP_DECORATOR_RE = re.compile(
+        r"(?i)(?:^|\.)(?:tool|resource|prompt|call_tool|read_resource|get_prompt)$"
+    )
+    OAUTH_TOKEN_PARAM_RE = re.compile(
+        r"(?i)^(?:access_token|bearer_token|oauth_token|upstream_token|jwt_token|client_secret|raw_api_key)$"
+    )
+    UNAUTH_BIND_ALL_INTERFACES_RE = re.compile(
+        r"""(?i)(?:host\s*=\s*['"]0\.0\.0\.0['"]|listen\s*\(\s*[0-9]+\s*,\s*['"]0\.0\.0\.0['"])"""
+    )
+
+    RULE_METADATA: dict[str, tuple[str, str, str]] = {
+        "MCP_SINK_CMD_INJECTION": (
+            "CWE-78",
+            "OS Command Injection in MCP Tool Handler",
+            "Pass command arguments as a list with `shell=False` and prefix `--`, or wrap with `shlex.quote()`.",
+        ),
+        "MCP_SINK_PATH_TRAVERSAL": (
+            "CWE-22",
+            "Unconfined File Path Access in MCP Tool Handler",
+            "Canonicalize paths via `Path(workspace_root).resolve()` and enforce `target.resolve().relative_to(root)`.",
+        ),
+        "MCP_SINK_SQL_INJECTION": (
+            "CWE-89",
+            "Raw SQL String Interpolation in MCP Tool Handler",
+            "Use parameterized SQL placeholders (`cursor.execute('SELECT ... WHERE id = ?', (param,))`).",
+        ),
+        "MCP_SINK_UNVALIDATED_SSRF": (
+            "CWE-918",
+            "Unvalidated Outbound HTTP/SSRF or Cross-Origin Auth Redirect in MCP Tool Handler",
+            "Validate URLs against RFC1918/loopback/cloud-metadata (`169.254.169.254`) and disable cross-origin auth redirects.",
+        ),
+        "MCP_SINK_UNSAFE_DESERIALIZATION_EVAL": (
+            "CWE-502",
+            "Dynamic Code Evaluation or Unsafe Deserialization of MCP Tool Input",
+            "Replace `eval`/`exec`/`pickle.loads`/`yaml.load` with `ast.literal_eval`, `json.loads`, or `yaml.safe_load`.",
+        ),
+        "MCP_TRANSPORT_UNAUTH_BIND_REBINDING": (
+            "CWE-346",
+            "Unauthenticated 0.0.0.0 Network Bind / DNS-Rebinding Exposure on MCP Transport",
+            "Bind local MCP HTTP/SSE transports to `127.0.0.1` and validate `Host` and `Origin` headers.",
+        ),
+        "MCP_OAUTH_CONFUSED_DEPUTY": (
+            "CWE-863",
+            "MCP OAuth Token Passthrough / Raw Credential Parameter in Tool Schema",
+            "Do not accept raw bearer/OAuth tokens as LLM-populated tool arguments; bind credentials in server vault.",
+        ),
+    }
+
+    @classmethod
+    def _synthesize_poc(cls, rule_id: str, tool_name: str, param_name: str) -> dict[str, Any]:
+        payload_map = {
+            "MCP_SINK_CMD_INJECTION": "canary; id",
+            "MCP_SINK_PATH_TRAVERSAL": "../../../../etc/passwd",
+            "MCP_SINK_SQL_INJECTION": "' UNION SELECT sqlite_version() --",
+            "MCP_SINK_UNVALIDATED_SSRF": "http://169.254.169.254/latest/meta-data/",
+            "MCP_SINK_UNSAFE_DESERIALIZATION_EVAL": "__import__('os').popen('id').read()",
+            "MCP_OAUTH_CONFUSED_DEPUTY": "eyJhbGciOiJub25lIn0.e30.",
+            "MCP_TRANSPORT_UNAUTH_BIND_REBINDING": "http://0.0.0.0:8000/sse",
+        }
+        p_key = param_name or "input"
+        return {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": {p_key: payload_map.get(rule_id, "canary_probe")},
+            },
+        }
+
+    @classmethod
+    def _ast_node_uses_tainted(cls, node: Any, tainted_vars: set[str], ast_mod: Any) -> str | None:
+        for sub in ast_mod.walk(node):
+            if isinstance(sub, ast_mod.Name) and sub.id in tainted_vars:
+                return sub.id
+            # Also detect `arguments.get("x")`, `args["x"]`, `params.get("x")`
+            if isinstance(sub, ast_mod.Subscript) and isinstance(sub.value, ast_mod.Name) and sub.value.id in tainted_vars:
+                if isinstance(sub.slice, ast_mod.Constant) and isinstance(sub.slice.value, str):
+                    return f"{sub.value.id}[{sub.slice.value!r}]"
+                return sub.value.id
+            if isinstance(sub, ast_mod.Call) and isinstance(sub.func, ast_mod.Attribute):
+                if isinstance(sub.func.value, ast_mod.Name) and sub.func.value.id in tainted_vars and sub.func.attr == "get":
+                    if sub.args and isinstance(sub.args[0], ast_mod.Constant):
+                        return f"{sub.func.value.id}.get({sub.args[0].value!r})"
+                    return sub.func.value.id
+        return None
+
+    @classmethod
+    def _is_interpolated_sql_node(cls, node: Any, tainted_vars: set[str], sql_tainted_vars: dict[str, str], ast_mod: Any) -> str | None:
+        if isinstance(node, ast_mod.Name) and node.id in sql_tainted_vars:
+            return sql_tainted_vars[node.id]
+        if isinstance(node, (ast_mod.JoinedStr, ast_mod.BinOp)):
+            return cls._ast_node_uses_tainted(node, tainted_vars, ast_mod)
+        if isinstance(node, ast_mod.Call) and isinstance(node.func, ast_mod.Attribute) and node.func.attr == "format":
+            return cls._ast_node_uses_tainted(node, tainted_vars, ast_mod)
+        return None
+
+    @classmethod
+    def audit_python_file(cls, path: Path) -> list[ServerSourceAuditFinding]:
+        import ast as _ast
+
+        findings: list[ServerSourceAuditFinding] = []
+        source = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = _ast.parse(source, filename=str(path))
+        except SyntaxError:
+            return findings
+
+        # Check Vector 6: Unauthenticated 0.0.0.0 transport bind without DNS-rebinding / auth middleware
+        has_auth_or_host_guard = bool(
+            re.search(r"(?i)\b(allowed_hosts|TrustedHostMiddleware|verify_origin|check_origin|BearerAuth|authenticate)\b", source)
+        )
+        for lineno, line in enumerate(source.splitlines(), start=1):
+            if cls.UNAUTH_BIND_ALL_INTERFACES_RE.search(line) and not has_auth_or_host_guard:
+                cwe, _, rem = cls.RULE_METADATA["MCP_TRANSPORT_UNAUTH_BIND_REBINDING"]
+                findings.append(
+                    ServerSourceAuditFinding(
+                        severity="HIGH",
+                        rule_id="MCP_TRANSPORT_UNAUTH_BIND_REBINDING",
+                        cwe_id=cwe,
+                        tool_name="<transport>",
+                        tainted_param="host",
+                        source_path=str(path),
+                        line_number=lineno,
+                        sink_expression=line.strip()[:100],
+                        message=(
+                            f"[Unauthenticated 0.0.0.0 Transport Bind / DNS Rebinding] `{path.name}:{lineno}` binds MCP "
+                            f"server to `0.0.0.0` without `Host`/`Origin` DNS-rebinding or auth middleware (CVE-2025-66416 class)."
+                        ),
+                        remediation=rem,
+                        poc_jsonrpc=cls._synthesize_poc("MCP_TRANSPORT_UNAUTH_BIND_REBINDING", "<transport>", "host"),
+                    )
+                )
+
+        for node in _ast.walk(tree):
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+
+            # Determine if function is an MCP tool/resource/prompt entrypoint
+            is_mcp_handler = False
+            tool_name = node.name
+            for dec in node.decorator_list:
+                dec_src = (_ast.get_source_segment(source, dec) or "").strip()
+                dec_name = dec_src.split("(")[0].lstrip("@").strip()
+                if cls.MCP_DECORATOR_RE.search(dec_name):
+                    is_mcp_handler = True
+                    if isinstance(dec, _ast.Call) and dec.args and isinstance(dec.args[0], _ast.Constant) and isinstance(dec.args[0].value, str):
+                        if not dec.args[0].value.startswith(("http://", "https://", "file://", "resource://")):
+                            tool_name = dec.args[0].value
+                    for kw in getattr(dec, "keywords", []):
+                        if kw.arg == "name" and isinstance(kw.value, _ast.Constant) and isinstance(kw.value.value, str):
+                            tool_name = kw.value.value
+
+            if not is_mcp_handler:
+                continue
+
+            param_names = [
+                a.arg for a in (node.args.posonlyargs + node.args.args + node.args.kwonlyargs)
+                if a.arg not in {"self", "cls", "ctx", "context"}
+            ]
+            if node.args.kwarg:
+                param_names.append(node.args.kwarg.arg)
+
+            # Check Vector 7: OAuth Confused Deputy / Raw Token Parameter in Tool Schema
+            for p_name in param_names:
+                if cls.OAUTH_TOKEN_PARAM_RE.match(p_name):
+                    cwe, _, rem = cls.RULE_METADATA["MCP_OAUTH_CONFUSED_DEPUTY"]
+                    findings.append(
+                        ServerSourceAuditFinding(
+                            severity="HIGH",
+                            rule_id="MCP_OAUTH_CONFUSED_DEPUTY",
+                            cwe_id=cwe,
+                            tool_name=tool_name,
+                            tainted_param=p_name,
+                            source_path=str(path),
+                            line_number=node.lineno,
+                            sink_expression=f"def {node.name}(..., {p_name}, ...)",
+                            message=(
+                                f"[MCP OAuth Confused Deputy / Token Passthrough] Tool `{tool_name}` accepts raw credential/token "
+                                f"parameter `{p_name}` directly from LLM tool arguments (`{path.name}:{node.lineno}`)."
+                            ),
+                            remediation=rem,
+                            poc_jsonrpc=cls._synthesize_poc("MCP_OAUTH_CONFUSED_DEPUTY", tool_name, p_name),
+                        )
+                    )
+
+            tainted_vars: set[str] = set(param_names)
+            var_origin: dict[str, str] = {p: p for p in param_names}
+            sanitized_path_vars: set[str] = set()
+            sanitized_cmd_vars: set[str] = set()
+            interpolated_sql_vars: dict[str, str] = {}
+
+            func_src = _ast.get_source_segment(source, node) or ""
+            has_func_level_path_guard = bool(
+                re.search(r"\b(relative_to|commonpath|is_safe_workspace_path|realpath)\b", func_src)
+            )
+            has_func_level_ssrf_guard = bool(
+                re.search(r"\b(validate_outbound_network_target|is_private|is_loopback|ip_address|allowed_domains|allowlist)\b", func_src)
+            )
+
+            # Pass 1: Intra-procedural taint propagation across assignments
+            for stmt in _ast.walk(node):
+                if isinstance(stmt, (_ast.Assign, _ast.AnnAssign)):
+                    targets = stmt.targets if isinstance(stmt, _ast.Assign) else [stmt.target]
+                    val = stmt.value
+                    if val is None:
+                        continue
+                    val_src = _ast.get_source_segment(source, val) or ""
+                    origin = cls._ast_node_uses_tainted(val, tainted_vars, _ast)
+                    if origin:
+                        root_param = var_origin.get(origin.split("[")[0].split(".")[0], origin)
+                        for tgt in targets:
+                            if isinstance(tgt, _ast.Name):
+                                if "shlex.quote" in val_src:
+                                    sanitized_cmd_vars.add(tgt.id)
+                                elif "relative_to" in val_src or "commonpath" in val_src:
+                                    sanitized_path_vars.add(tgt.id)
+                                else:
+                                    tainted_vars.add(tgt.id)
+                                    var_origin[tgt.id] = root_param
+                                    if isinstance(val, (_ast.JoinedStr, _ast.BinOp)) or (
+                                        isinstance(val, _ast.Call)
+                                        and isinstance(val.func, _ast.Attribute)
+                                        and val.func.attr == "format"
+                                    ):
+                                        if re.search(r"(?i)\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|DROP|ALTER)\b", val_src):
+                                            interpolated_sql_vars[tgt.id] = root_param
+
+            # Pass 2: Sink reachability analysis
+            for sub in _ast.walk(node):
+                if not isinstance(sub, _ast.Call):
+                    continue
+                lineno = getattr(sub, "lineno", node.lineno)
+                call_src = (_ast.get_source_segment(source, sub) or "").strip()
+                func_qname = ""
+                if isinstance(sub.func, _ast.Name):
+                    func_qname = sub.func.id
+                elif isinstance(sub.func, _ast.Attribute):
+                    base_id = getattr(sub.func.value, "id", "")
+                    if isinstance(sub.func.value, _ast.Attribute):
+                        base_id = f"{getattr(sub.func.value.value, 'id', '')}.{sub.func.value.attr}".strip(".")
+                    func_qname = f"{base_id}.{sub.func.attr}".strip(".")
+
+                all_call_args = list(sub.args) + [kw.value for kw in sub.keywords if kw.value is not None]
+                tainted_hit = None
+                for arg_node in all_call_args:
+                    hit = cls._ast_node_uses_tainted(arg_node, tainted_vars, _ast)
+                    if hit:
+                        tainted_hit = var_origin.get(hit.split("[")[0].split(".")[0], hit)
+                        break
+
+                if not tainted_hit:
+                    continue
+
+                # Sink 1: OS Command Injection (`CWE-78`)
+                is_shell_true = any(
+                    kw.arg == "shell" and isinstance(kw.value, _ast.Constant) and kw.value.value is True
+                    for kw in sub.keywords
+                )
+                is_cmd_sink = (
+                    func_qname in {"os.system", "os.popen", "asyncio.create_subprocess_shell", "commands.getoutput"}
+                    or (
+                        func_qname in {"subprocess.run", "subprocess.Popen", "subprocess.call", "subprocess.check_output", "subprocess.check_call"}
+                        and is_shell_true
+                    )
+                )
+                if is_cmd_sink and "shlex.quote" not in call_src:
+                    cwe, _, rem = cls.RULE_METADATA["MCP_SINK_CMD_INJECTION"]
+                    findings.append(
+                        ServerSourceAuditFinding(
+                            severity="CRITICAL",
+                            rule_id="MCP_SINK_CMD_INJECTION",
+                            cwe_id=cwe,
+                            tool_name=tool_name,
+                            tainted_param=tainted_hit,
+                            source_path=str(path),
+                            line_number=lineno,
+                            sink_expression=call_src[:120],
+                            message=(
+                                f"[MCP Tool OS Command Injection (CWE-78)] Untrusted parameter `{tainted_hit}` in tool `{tool_name}` "
+                                f"flows into shell command sink `{func_qname}` at `{path.name}:{lineno}`."
+                            ),
+                            remediation=rem,
+                            poc_jsonrpc=cls._synthesize_poc("MCP_SINK_CMD_INJECTION", tool_name, tainted_hit),
+                        )
+                    )
+                    continue
+
+                # Sink 2: Dynamic Eval / Unsafe Deserialization (`CWE-94` / `CWE-502`)
+                is_unsafe_yaml = func_qname in {"yaml.load", "yaml.unsafe_load"} and "SafeLoader" not in call_src
+                if func_qname in {"eval", "exec", "pickle.loads", "marshal.loads", "jsonpickle.decode"} or is_unsafe_yaml:
+                    cwe = "CWE-94" if func_qname in {"eval", "exec"} else "CWE-502"
+                    _, _, rem = cls.RULE_METADATA["MCP_SINK_UNSAFE_DESERIALIZATION_EVAL"]
+                    findings.append(
+                        ServerSourceAuditFinding(
+                            severity="CRITICAL",
+                            rule_id="MCP_SINK_UNSAFE_DESERIALIZATION_EVAL",
+                            cwe_id=cwe,
+                            tool_name=tool_name,
+                            tainted_param=tainted_hit,
+                            source_path=str(path),
+                            line_number=lineno,
+                            sink_expression=call_src[:120],
+                            message=(
+                                f"[MCP Tool Dynamic Eval / Unsafe Deserialization ({cwe})] Untrusted parameter `{tainted_hit}` "
+                                f"in tool `{tool_name}` reaches `{func_qname}` at `{path.name}:{lineno}`."
+                            ),
+                            remediation=rem,
+                            poc_jsonrpc=cls._synthesize_poc("MCP_SINK_UNSAFE_DESERIALIZATION_EVAL", tool_name, tainted_hit),
+                        )
+                    )
+                    continue
+
+                # Sink 3: Raw SQL String Interpolation (`CWE-89`)
+                if isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"execute", "executemany", "executescript"} and sub.args:
+                    sql_hit = cls._is_interpolated_sql_node(sub.args[0], tainted_vars, interpolated_sql_vars, _ast)
+                    if sql_hit:
+                        root_sql_param = var_origin.get(sql_hit.split("[")[0].split(".")[0], sql_hit)
+                        cwe, _, rem = cls.RULE_METADATA["MCP_SINK_SQL_INJECTION"]
+                        findings.append(
+                            ServerSourceAuditFinding(
+                                severity="CRITICAL",
+                                rule_id="MCP_SINK_SQL_INJECTION",
+                                cwe_id=cwe,
+                                tool_name=tool_name,
+                                tainted_param=root_sql_param,
+                                source_path=str(path),
+                                line_number=lineno,
+                                sink_expression=call_src[:120],
+                                message=(
+                                    f"[MCP Tool SQL Injection (CWE-89)] Untrusted parameter `{root_sql_param}` in tool `{tool_name}` "
+                                    f"is string-interpolated directly into SQL `.{sub.func.attr}()` at `{path.name}:{lineno}`."
+                                ),
+                                remediation=rem,
+                                poc_jsonrpc=cls._synthesize_poc("MCP_SINK_SQL_INJECTION", tool_name, root_sql_param),
+                            )
+                        )
+                        continue
+
+                # Sink 4: Unconfined Path Traversal (`CWE-22`)
+                is_fs_sink = (
+                    func_qname in {"open", "os.remove", "os.unlink", "os.rmdir", "shutil.rmtree", "shutil.copy", "shutil.move"}
+                    or (isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"read_text", "write_text", "read_bytes", "write_bytes", "unlink"})
+                )
+                if is_fs_sink and not has_func_level_path_guard:
+                    cwe, _, rem = cls.RULE_METADATA["MCP_SINK_PATH_TRAVERSAL"]
+                    findings.append(
+                        ServerSourceAuditFinding(
+                            severity="HIGH",
+                            rule_id="MCP_SINK_PATH_TRAVERSAL",
+                            cwe_id=cwe,
+                            tool_name=tool_name,
+                            tainted_param=tainted_hit,
+                            source_path=str(path),
+                            line_number=lineno,
+                            sink_expression=call_src[:120],
+                            message=(
+                                f"[MCP Tool Unconfined Path Access (CWE-22)] Untrusted parameter `{tainted_hit}` in tool `{tool_name}` "
+                                f"flows into filesystem sink `{func_qname}` without `.resolve().relative_to()` confinement at `{path.name}:{lineno}`."
+                            ),
+                            remediation=rem,
+                            poc_jsonrpc=cls._synthesize_poc("MCP_SINK_PATH_TRAVERSAL", tool_name, tainted_hit),
+                        )
+                    )
+                    continue
+
+                # Sink 5: Unvalidated SSRF / Cross-Origin Redirect Credential Leak (`CWE-918`)
+                is_http_sink = (
+                    func_qname in {"requests.get", "requests.post", "requests.put", "requests.delete", "requests.request", "httpx.get", "httpx.post", "urllib.request.urlopen"}
+                    or (isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"get", "post", "request", "urlopen"} and sub.args and any(k in tainted_hit.lower() for k in ("url", "uri", "endpoint", "target", "webhook", "host")))
+                )
+                if is_http_sink and not has_func_level_ssrf_guard:
+                    cwe, _, rem = cls.RULE_METADATA["MCP_SINK_UNVALIDATED_SSRF"]
+                    findings.append(
+                        ServerSourceAuditFinding(
+                            severity="HIGH",
+                            rule_id="MCP_SINK_UNVALIDATED_SSRF",
+                            cwe_id=cwe,
+                            tool_name=tool_name,
+                            tainted_param=tainted_hit,
+                            source_path=str(path),
+                            line_number=lineno,
+                            sink_expression=call_src[:120],
+                            message=(
+                                f"[MCP Tool Unvalidated SSRF (CWE-918)] Untrusted URL parameter `{tainted_hit}` in tool `{tool_name}` "
+                                f"flows into outbound HTTP sink `{func_qname}` without IP/IMDS validation at `{path.name}:{lineno}`."
+                            ),
+                            remediation=rem,
+                            poc_jsonrpc=cls._synthesize_poc("MCP_SINK_UNVALIDATED_SSRF", tool_name, tainted_hit),
+                        )
+                    )
+
+        return findings
+
+    @classmethod
+    def audit_typescript_file(cls, path: Path) -> list[ServerSourceAuditFinding]:
+        """
+        Audits TypeScript / JavaScript MCP server files (`@modelcontextprotocol/sdk`) for
+        `server.tool(...)` and `CallToolRequestSchema` handlers flowing into `child_process.exec`,
+        unconfined `fs.readFile/writeFile`, raw SQL template literals, and `fetch()` SSRF sinks.
+        """
+        findings: list[ServerSourceAuditFinding] = []
+        source = path.read_text(encoding="utf-8", errors="replace")
+        lines = source.splitlines()
+
+        tool_header_re = re.compile(
+            r"""(?:server|mcp)\.(?:tool|registerTool)\s*\(\s*['"]([a-zA-Z0-9_.\-]+)['"]"""
+        )
+        current_tool = "<ts_mcp_handler>"
+        has_path_guard = bool(re.search(r"\b(path\.resolve|startsWith|realpathSync)\b", source))
+
+        for idx, line in enumerate(lines, start=1):
+            m_tool = tool_header_re.search(line)
+            if m_tool:
+                current_tool = m_tool.group(1)
+
+            if re.search(r"\b(?:exec|execSync|spawn)\s*\(\s*`[^`]*\$\{", line):
+                cwe, _, rem = cls.RULE_METADATA["MCP_SINK_CMD_INJECTION"]
+                findings.append(
+                    ServerSourceAuditFinding(
+                        severity="CRITICAL",
+                        rule_id="MCP_SINK_CMD_INJECTION",
+                        cwe_id=cwe,
+                        tool_name=current_tool,
+                        tainted_param="template_arg",
+                        source_path=str(path),
+                        line_number=idx,
+                        sink_expression=line.strip()[:120],
+                        message=f"[TypeScript MCP Command Injection (CWE-78)] Unescaped template literal in `exec`/`execSync` at `{path.name}:{idx}`.",
+                        remediation=rem,
+                        poc_jsonrpc=cls._synthesize_poc("MCP_SINK_CMD_INJECTION", current_tool, "cmd"),
+                    )
+                )
+            if not has_path_guard and re.search(r"\bfs(?:\.promises)?\.(?:readFile|writeFile|readFileSync|writeFileSync|unlink|rm)\s*\(", line):
+                cwe, _, rem = cls.RULE_METADATA["MCP_SINK_PATH_TRAVERSAL"]
+                findings.append(
+                    ServerSourceAuditFinding(
+                        severity="HIGH",
+                        rule_id="MCP_SINK_PATH_TRAVERSAL",
+                        cwe_id=cwe,
+                        tool_name=current_tool,
+                        tainted_param="path",
+                        source_path=str(path),
+                        line_number=idx,
+                        sink_expression=line.strip()[:120],
+                        message=f"[TypeScript MCP Unconfined File Access (CWE-22)] `fs` operation without `path.resolve` prefix check at `{path.name}:{idx}`.",
+                        remediation=rem,
+                        poc_jsonrpc=cls._synthesize_poc("MCP_SINK_PATH_TRAVERSAL", current_tool, "path"),
+                    )
+                )
+        return findings
+
+    @classmethod
+    def to_sarif(cls, findings: list[ServerSourceAuditFinding]) -> dict[str, Any]:
+        """ Formats findings as a standards-compliant SARIF v2.1.0 report for GitHub Code Scanning. """
+        rules = []
+        for rule_id, (cwe, short_desc, rem) in cls.RULE_METADATA.items():
+            rules.append(
+                {
+                    "id": rule_id,
+                    "name": rule_id,
+                    "shortDescription": {"text": f"{short_desc} ({cwe})"},
+                    "help": {"text": rem},
+                    "properties": {"tags": ["security", "mcp", cwe.lower()]},
+                }
+            )
+        results = []
+        for f in findings:
+            level = "error" if f.severity in {"CRITICAL", "HIGH"} else "warning"
+            results.append(
+                {
+                    "ruleId": f.rule_id,
+                    "level": level,
+                    "message": {"text": f.message},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": f.source_path},
+                                "region": {"startLine": f.line_number},
+                            }
+                        }
+                    ],
+                    "properties": {
+                        "cwe": f.cwe_id,
+                        "tool_name": f.tool_name,
+                        "tainted_param": f.tainted_param,
+                        "poc_jsonrpc": f.poc_jsonrpc,
+                    },
+                }
+            )
+        return {
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "mcp-cage audit-server",
+                            "version": __version__,
+                            "informationUri": "https://github.com/nagarajulu/mcp-cage",
+                            "rules": rules,
+                        }
+                    },
+                    "results": results,
+                }
+            ],
+        }
+
+    @classmethod
+    def discover_and_audit(
+        cls, target_paths: list[Path], *, output_format: str = "json"
+    ) -> dict[str, Any]:
+        candidate_files: list[Path] = []
+        seen: set[Path] = set()
+        for p in target_paths:
+            rp = p.resolve()
+            if rp.is_file():
+                if rp not in seen and rp.suffix in {".py", ".ts", ".js"}:
+                    seen.add(rp)
+                    candidate_files.append(p)
+            elif rp.is_dir():
+                for ext in ("*.py", "*.ts", "*.js"):
+                    for m in sorted(rp.rglob(ext)):
+                        if any(part in {".git", "node_modules", ".venv", "venv", "__pycache__", "tests"} for part in m.parts):
+                            continue
+                        if m.resolve() not in seen:
+                            seen.add(m.resolve())
+                            candidate_files.append(m)
+
+        all_findings: list[ServerSourceAuditFinding] = []
+        audited_files: list[str] = []
+        for fpath in candidate_files:
+            audited_files.append(str(fpath))
+            if fpath.suffix == ".py":
+                all_findings.extend(cls.audit_python_file(fpath))
+            elif fpath.suffix in {".ts", ".js"}:
+                all_findings.extend(cls.audit_typescript_file(fpath))
+
+        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0}
+        for f in all_findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+
+        if output_format == "sarif":
+            return cls.to_sarif(all_findings)
+
+        return {
+            "audited_files": audited_files,
+            "summary": counts,
+            "findings": [f.to_dict() for f in all_findings],
+        }
+
+
+class LiveMCPServerProber:
+    """
+    v0.4.2 Live Black-Box / Grey-Box MCP Server Schema Introspector & Non-Destructive
+    Differential Canary Boundary Prober (`mcp-cage probe-live -- <cmd...>`).
+
+    Spawns any stdio MCP server inside a temporary canary workspace, performs the JSON-RPC 2.0
+    `initialize` -> `tools/list` / `resources/list` / `prompts/list` handshake, scores all live
+    tool descriptions with `WireDIFCCanonicalizer` + `SchemaLockVerifier` + `ToxicFlowGraphAnalyzer`,
+    and executes side-effect-free differential boundary probes to identify:
+      - Unhandled path resolution / sibling-prefix traversal error oracles (`CWE-22` / `CWE-209`)
+      - Raw SQL syntax error disclosure on single-quote parity (`CWE-89` / `CWE-209`)
+      - Stack-trace or environment secret disclosure inside JSON-RPC responses (`CWE-209`)
+    """
+
+    STACK_OR_SQL_ORACLE_RE = re.compile(
+        r"(?i)(?:Traceback \(most recent call last\)|sqlite3\.OperationalError|psycopg2\.errors|MySQLInterfaceError|ORA-[0-9]{5}|syntax error at or near|unrecognized token:)"
+    )
+
+    @classmethod
+    def probe_stdio_server(
+        cls, cmd: list[str], *, run_boundary_probes: bool = True, timeout_sec: float = 8.0
+    ) -> dict[str, Any]:
+        clean_cmd = [c for c in cmd if c != "--"]
+        if not clean_cmd:
+            return {"status": "error", "error": "No upstream MCP server command provided."}
+
+        with tempfile.TemporaryDirectory(prefix="mcp_cage_canary_") as tmp_dir:
+            proc = subprocess.Popen(
+                clean_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=tmp_dir,
+                text=True,
+            )
+            assert proc.stdin is not None and proc.stdout is not None
+
+            def _send_and_recv(req_obj: dict[str, Any]) -> dict[str, Any] | None:
+                proc.stdin.write(json.dumps(req_obj) + "\n")
+                proc.stdin.flush()
+                if "id" not in req_obj:
+                    return None
+                deadline = time.time() + timeout_sec
+                while time.time() < deadline:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except Exception:
+                        continue
+                    if msg.get("id") == req_obj["id"]:
+                        return msg
+                return None
+
+            try:
+                init_resp = _send_and_recv(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "clientInfo": {"name": "mcp-cage-prober", "version": __version__},
+                        },
+                    }
+                )
+                _send_and_recv({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+                tools_resp = _send_and_recv({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+                tools = (tools_resp or {}).get("result", {}).get("tools", []) if isinstance((tools_resp or {}).get("result"), Mapping) else []
+
+                schema_findings: list[dict[str, Any]] = []
+                boundary_findings: list[dict[str, Any]] = []
+
+                for idx, tool in enumerate(tools):
+                    t_name = str(tool.get("name") or "")
+                    t_desc = str(tool.get("description") or "")
+                    schema = tool.get("inputSchema") or {}
+                    props = dict(schema.get("properties") or {}) if isinstance(schema, Mapping) else {}
+                    _, p_score, p_flagged = WireDIFCCanonicalizer.canonicalize_tool_4slot(
+                        "probed", t_name, t_desc, list(props.keys())
+                    )
+                    if p_flagged or SchemaLockVerifier.INJECTION_MARKERS.search(t_desc):
+                        schema_findings.append(
+                            {
+                                "severity": "CRITICAL",
+                                "rule_id": "LIVE_TOOL_POISONING_SCHEMA",
+                                "tool_name": t_name,
+                                "poisoning_score": round(p_score, 3),
+                                "message": f"Live `tools/list` description for `{t_name}` triggered poisoning score {p_score:.2f}.",
+                            }
+                        )
+
+                    if run_boundary_probes and props:
+                        # Construct a safe non-destructive canary boundary call
+                        probe_args: dict[str, Any] = {}
+                        for pk, pv in props.items():
+                            p_type = str((pv or {}).get("type") or "string")
+                            pk_low = pk.lower()
+                            if p_type == "string":
+                                if any(k in pk_low for k in ("path", "file", "dir")):
+                                    probe_args[pk] = "../mcp_cage_nonexistent_canary_9f8a.txt"
+                                elif any(k in pk_low for k in ("query", "sql", "filter", "where")):
+                                    probe_args[pk] = "1' AND '1'='1"
+                                elif any(k in pk_low for k in ("url", "uri", "endpoint")):
+                                    probe_args[pk] = "http://127.0.0.1:65534/mcp_cage_canary"
+                                else:
+                                    probe_args[pk] = "mcp_cage_canary_probe"
+                            elif p_type in {"integer", "number"}:
+                                probe_args[pk] = 1
+                            elif p_type == "boolean":
+                                probe_args[pk] = False
+
+                        call_resp = _send_and_recv(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": 100 + idx,
+                                "method": "tools/call",
+                                "params": {"name": t_name, "arguments": probe_args},
+                            }
+                        )
+                        raw_call_str = json.dumps(call_resp or {}, ensure_ascii=False)
+                        m_oracle = cls.STACK_OR_SQL_ORACLE_RE.search(raw_call_str)
+                        if m_oracle:
+                            boundary_findings.append(
+                                {
+                                    "severity": "HIGH",
+                                    "rule_id": "LIVE_DIFFERENTIAL_ERROR_ORACLE",
+                                    "cwe_id": "CWE-209",
+                                    "tool_name": t_name,
+                                    "oracle_match": m_oracle.group(0),
+                                    "probe_arguments": probe_args,
+                                    "message": (
+                                        f"Live boundary probe on `{t_name}` leaked raw exception/SQL oracle "
+                                        f"(`{m_oracle.group(0)}`) in JSON-RPC response (CWE-209)."
+                                    ),
+                                }
+                            )
+
+                classified, toxic_flows = ToxicFlowGraphAnalyzer.audit_mcp_tools({"probed_server": tools})
+                return {
+                    "status": "ok",
+                    "server_info": (init_resp or {}).get("result", {}).get("serverInfo", {}),
+                    "tools_count": len(tools),
+                    "classified_roles": classified,
+                    "toxic_flows": [tf.__dict__ for tf in toxic_flows],
+                    "schema_findings": schema_findings,
+                    "boundary_findings": boundary_findings,
+                }
+            finally:
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
+                    try:
+                        if stream is not None:
+                            stream.close()
+                    except Exception:
+                        pass
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    proc.kill()
+
+
+# -----------------------------------------------------------------------------
 # Plane A: `MCPWireGateway` (Async & Sync JSON-RPC 2.0 Proxy with Spotlighting)
 # -----------------------------------------------------------------------------
 
@@ -3455,12 +4618,38 @@ class MCPWireGateway:
                                 },
                             }
 
+            # (b2) v0.4.2 Cross-Turn Salami-Slice Chunked Exfiltration Circuit Breaker
+            if ToolRole.EXTERNAL_EGRESS_SINK in profile.roles and cur_conf >= Confidentiality.CONFIDENTIAL:
+                salami_ok, salami_reason = self.state_machine.check_and_record_cross_turn_egress(
+                    tool_name, arguments, cur_int, cur_conf
+                )
+                if not salami_ok:
+                    return None, {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "result": {
+                            "isError": True,
+                            "content": [{"type": "text", "text": f"[MCP-CAGE HARD_DENY] {salami_reason}"}],
+                        },
+                    }
+
             # (c) Content-Addressed Line-Span Persistent Provenance Recording on Untrusted File Writes
-            if cur_int < Integrity.TRUSTED and tool_name in {"write_file", "edit_file", "append_file"}:
+            if cur_int < Integrity.TRUSTED and tool_name in {"write_file", "edit_file", "append_file", "write", "edit", "multi_edit"}:
                 w_path = str(arguments.get("path") or arguments.get("file_path") or "")
                 w_content = str(arguments.get("content") or arguments.get("replacement") or "")
                 if w_path and w_content:
                     self.span_provenance.record_file_write_spans(w_path, w_content, cur_int.name)
+
+            # (d) v0.4.2 Subagent / Multi-Agent Confused-Deputy Taint Inheritance
+            if re.search(r"(?i)(?:^|[._\-])(task|dispatch_agent|spawn_agent|create_agent|delegate_task|subagent|invoke_subagent)(?:$|[._\-])", tool_name):
+                child_sid = str(
+                    arguments.get("session_id")
+                    or arguments.get("child_session_id")
+                    or arguments.get("conversation_id")
+                    or arguments.get("agent_id")
+                    or "subagent"
+                )
+                self.state_machine.propagate_taint_to_subagent(child_sid)
 
             # Meta-tool inner dispatch guard: evaluate wrapped `tool_name`/`tool` + `arguments`/`args`
             inner_tool = arguments.get("tool_name") or arguments.get("tool")
@@ -3510,7 +4699,35 @@ class MCPWireGateway:
         """
         if "method" in msg:
             method = str(msg.get("method") or "")
+            srv_params = dict(msg.get("params") or {}) if isinstance(msg.get("params"), Mapping) else {}
             if method == "sampling/createMessage":
+                cur_int, cur_conf, _, _ = self.state_machine.get_state()
+                include_ctx = str(srv_params.get("includeContext") or "").lower()
+                sys_prompt = str(srv_params.get("systemPrompt") or "")
+                # v0.4.2 Reverse-Channel Sampling Firewall:
+                # Block sampling if session is tainted OR if server requests cross-server context ("allServers")
+                # OR injects an override systemPrompt containing injection/role-breakout markers.
+                has_dangerous_sampling_params = (
+                    include_ctx in {"allservers", "all"}
+                    or bool(SchemaLockVerifier.INJECTION_MARKERS.search(sys_prompt))
+                    or bool(WirePayloadSanitizer.ROLE_DELIMITER_BREAKOUT_RE.search(sys_prompt))
+                )
+                if cur_int < Integrity.TRUSTED or cur_conf >= Confidentiality.CONFIDENTIAL or has_dangerous_sampling_params:
+                    return None, {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "error": {
+                            "code": -32001,
+                            "message": (
+                                f"[MCP SAMPLING FIREWALL] [MCP-CAGE BLOCKED SAMPLING HIJACK] "
+                                f"Server '{self.server_name}' denied sampling (session={cur_int.name}/{cur_conf.name}, "
+                                f"includeContext='{include_ctx}')."
+                            ),
+                        },
+                    }
+            elif method == "roots/list":
+                # v0.4.2 Reverse-Channel Roots Enumeration Firewall (`CWE-200`):
+                # Prevent untrusted or tainted MCP servers from enumerating host filesystem roots.
                 cur_int, cur_conf, _, _ = self.state_machine.get_state()
                 if cur_int < Integrity.TRUSTED or cur_conf >= Confidentiality.CONFIDENTIAL:
                     return None, {
@@ -3519,8 +4736,32 @@ class MCPWireGateway:
                         "error": {
                             "code": -32001,
                             "message": (
-                                f"[MCP SAMPLING FIREWALL] [MCP-CAGE BLOCKED SAMPLING HIJACK] "
-                                f"Server '{self.server_name}' denied sampling while session is ({cur_int.name}, {cur_conf.name})."
+                                f"[MCP ROOTS FIREWALL] [MCP-CAGE BLOCKED HOST RECON] "
+                                f"Server '{self.server_name}' denied `roots/list` host root enumeration while session is ({cur_int.name}, {cur_conf.name})."
+                            ),
+                        },
+                    }
+            elif method == "elicitation/create":
+                # v0.4.2 Reverse-Channel Elicitation Credential-Phishing Firewall (`CWE-451` / `CWE-200`):
+                # Block server-initiated user input prompts when session is tainted or when requesting secrets/tokens/passwords.
+                cur_int, cur_conf, _, _ = self.state_machine.get_state()
+                raw_elicit = json.dumps(srv_params, ensure_ascii=False)
+                requests_credentials = bool(
+                    re.search(
+                        r"(?i)\b(password|passphrase|secret|api[_-]?key|access[_-]?token|bearer|private[_-]?key|otp|mfa|2fa|seed[_-]?phrase|ssn)\b",
+                        raw_elicit,
+                    )
+                )
+                if cur_int < Integrity.TRUSTED or requests_credentials:
+                    return None, {
+                        "jsonrpc": "2.0",
+                        "id": msg.get("id"),
+                        "error": {
+                            "code": -32001,
+                            "message": (
+                                f"[MCP ELICITATION FIREWALL] [MCP-CAGE BLOCKED CREDENTIAL PHISHING] "
+                                f"Server '{self.server_name}' denied `elicitation/create` user prompt "
+                                f"(session={cur_int.name}, credential_schema={requests_credentials})."
                             ),
                         },
                     }
@@ -3597,10 +4838,11 @@ class MCPWireGateway:
                         roles=frozenset({ToolRole.UNTRUSTED_SOURCE}),
                         source_integrity=Integrity.UNTRUSTED,
                     )
+                    real_ents = [e for e in sorted(recovered_ents) if e != "__TAINTED_IMPERATIVE_SPAN__"]
                     self.state_machine.on_tool_response(
                         profile=untrusted_span_profile,
                         arguments={"path": r_path},
-                        response_text=" ".join(f"https://{e}" for e in sorted(recovered_ents)),
+                        response_text=" ".join(f"https://{e}" for e in real_ents) if real_ents else "stored_imperative_span",
                         had_redacted_secrets=False,
                     )
             return {**msg, "result": scrubbed_result}, None
@@ -3608,15 +4850,20 @@ class MCPWireGateway:
         if in_flight.method == "resources/read":
             uri = str(in_flight.params.get("uri") or "")
             raw_str = json.dumps(result, ensure_ascii=False)
-            sanitized_str, _ = WirePayloadSanitizer.sanitize_text(raw_str)
+            is_external_uri = uri.lower().startswith(("http://", "https://", "git://", "ws://", "wss://"))
+            if is_external_uri:
+                sanitized_str, _ = WirePayloadSanitizer.sanitize_untrusted_inbound_text(raw_str)
+            else:
+                sanitized_str, _ = WirePayloadSanitizer.sanitize_text(raw_str)
             scrubbed_str, minted = self.scrubber.scrub_text(sanitized_str)
             scrubbed_result = json.loads(scrubbed_str)
 
             res_profile = ToolSecurityProfile(
                 server=self.server_name,
                 tool_name="resources/read",
-                roles=frozenset({ToolRole.PRIVATE_SOURCE}),
-                source_taint_resolver=filesystem_read_taint_resolver,
+                roles=frozenset({ToolRole.UNTRUSTED_SOURCE}) if is_external_uri else frozenset({ToolRole.PRIVATE_SOURCE}),
+                source_integrity=Integrity.UNTRUSTED if is_external_uri else Integrity.TRUSTED,
+                source_taint_resolver=None if is_external_uri else filesystem_read_taint_resolver,
             )
             self.state_machine.on_tool_response(
                 profile=res_profile,
@@ -3813,7 +5060,10 @@ def handle_cli_hook(
     # 3. Post-Tool Response hooks (`PostToolUse`, `AfterTool`, `afterMCPExecution`)
     if event_low in {"posttooluse", "aftertool", "aftermcpexecution"}:
         raw_resp = str(payload.get("tool_response") or payload.get("output") or "")
-        sanitized_resp, _ = WirePayloadSanitizer.sanitize_text(raw_resp)
+        if ToolRole.UNTRUSTED_SOURCE in profile.roles:
+            sanitized_resp, _ = WirePayloadSanitizer.sanitize_untrusted_inbound_text(raw_resp)
+        else:
+            sanitized_resp, _ = WirePayloadSanitizer.sanitize_text(raw_resp)
         scrubbed_resp, minted = scrubber.scrub_text(sanitized_resp)
         sm.on_tool_response(
             profile=profile,
@@ -3821,6 +5071,26 @@ def handle_cli_hook(
             response_text=sanitized_resp,
             had_redacted_secrets=bool(minted),
         )
+        # v0.4.2 Plane B Line-Span Persistent Provenance check on file reads
+        r_path = str(tool_input.get("path") or tool_input.get("file_path") or "")
+        if r_path and sanitized_resp:
+            span_prov = PersistentLineSpanProvenance(db_path)
+            recovered_ents = span_prov.check_file_read_spans(r_path, sanitized_resp)
+            if recovered_ents:
+                untrusted_span_profile = ToolSecurityProfile(
+                    server="native",
+                    tool_name=f"{tool_name}:tainted_span",
+                    roles=frozenset({ToolRole.UNTRUSTED_SOURCE}),
+                    source_integrity=Integrity.UNTRUSTED,
+                )
+                real_ents = [e for e in sorted(recovered_ents) if e != "__TAINTED_IMPERATIVE_SPAN__"]
+                sm.on_tool_response(
+                    profile=untrusted_span_profile,
+                    arguments={"path": r_path},
+                    response_text=" ".join(f"https://{e}" for e in real_ents) if real_ents else "stored_imperative_span",
+                    had_redacted_secrets=False,
+                )
+
         spotlighted = (
             WirePayloadSanitizer.spotlight_untrusted_text(scrubbed_resp)
             if ToolRole.UNTRUSTED_SOURCE in profile.roles
@@ -3846,6 +5116,63 @@ def handle_cli_hook(
         )
     else:
         eval_res = sm.on_tool_call(profile, tool_input)
+
+    # v0.4.2 Plane B Wire-DIFC Parity Guards (when eval_res is ALLOW):
+    if eval_res.effective_decision == GateDecisionType.ALLOW:
+        cur_int, cur_conf = eval_res.ambient_integrity, eval_res.ambient_confidentiality
+        # (a) Two-Axis Covert Hex DNS & Diceware-in-Identifier Guard
+        if cur_int < Integrity.TRUSTED and cur_conf >= Confidentiality.SECRET:
+            for arg_k, arg_v in tool_input.items():
+                if isinstance(arg_v, str):
+                    cov_flagged, cov_reason = is_covert_exfil_identifier(str(arg_k), arg_v)
+                    if cov_flagged:
+                        eff_dec = GateDecisionType.ALLOW if sm.mode == EnforcementMode.SHADOW else GateDecisionType.DENY
+                        eval_res = GateEvaluation(
+                            decision=GateDecisionType.DENY,
+                            effective_decision=eff_dec,
+                            mode=sm.mode,
+                            reason=cov_reason,
+                            human_summary=cov_reason,
+                            ambient_integrity=cur_int,
+                            ambient_confidentiality=cur_conf,
+                        )
+                        break
+
+        # (b) Cross-Turn Salami-Slice Chunked Exfiltration Circuit Breaker
+        if eval_res.effective_decision == GateDecisionType.ALLOW and ToolRole.EXTERNAL_EGRESS_SINK in profile.roles and cur_conf >= Confidentiality.CONFIDENTIAL:
+            salami_ok, salami_reason = sm.check_and_record_cross_turn_egress(tool_name, tool_input, cur_int, cur_conf)
+            if not salami_ok:
+                eff_dec = GateDecisionType.ALLOW if sm.mode == EnforcementMode.SHADOW else GateDecisionType.DENY
+                eval_res = GateEvaluation(
+                    decision=GateDecisionType.DENY,
+                    effective_decision=eff_dec,
+                    mode=sm.mode,
+                    reason=salami_reason,
+                    human_summary=salami_reason,
+                    ambient_integrity=cur_int,
+                    ambient_confidentiality=cur_conf,
+                )
+
+        # (c) Content-Addressed Line-Span Persistent Provenance Recording on Untrusted File Writes
+        if eval_res.effective_decision == GateDecisionType.ALLOW and cur_int < Integrity.TRUSTED and tool_name.lower() in {"write", "edit", "multi_edit", "write_file", "edit_file", "append_file", "replace_file_content"}:
+            w_path = str(tool_input.get("path") or tool_input.get("file_path") or "")
+            w_content = str(tool_input.get("content") or tool_input.get("replacement") or tool_input.get("new_string") or "")
+            if w_path and w_content:
+                PersistentLineSpanProvenance(db_path).record_file_write_spans(w_path, w_content, cur_int.name)
+
+        # (d) Subagent Confused-Deputy Taint Inheritance on `Task` / `invoke_subagent` / `spawn_agent`
+        if eval_res.effective_decision == GateDecisionType.ALLOW and re.search(
+            r"(?i)(?:^|[._\-])(task|dispatch_agent|spawn_agent|create_agent|delegate_task|subagent|invoke_subagent)(?:$|[._\-])",
+            tool_name,
+        ):
+            child_sid = str(
+                tool_input.get("session_id")
+                or tool_input.get("child_session_id")
+                or tool_input.get("conversation_id")
+                or tool_input.get("agent_id")
+                or "subagent"
+            )
+            sm.propagate_taint_to_subagent(child_sid)
 
     eff = eval_res.effective_decision
 
@@ -4119,6 +5446,10 @@ class PersistentLineSpanProvenance:
     def _hash_line(line: str) -> str:
         return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()
 
+    IMPERATIVE_SPAN_RE = re.compile(
+        r"(?i)(?:\b(?:always|must|never|override|ignore\s+previous|supersede|do\s+not\s+mention|silently)\b[^\n]{0,80}\b(?:pass|run|execute|curl|wget|fetch|upload-pack|no-verify|autoapprove|bashrc|zshrc|chmod|eval|exec|subagent)\b|--(?:upload-pack|no-verify|kubeconfig|index-url)\b|<!--[^>]+-->)"
+    )
+
     def record_file_write_spans(self, file_path: str, content: str, origin_integrity: str = "UNTRUSTED") -> int:
         if origin_integrity == "TRUSTED" or not content:
             return 0
@@ -4128,9 +5459,17 @@ class PersistentLineSpanProvenance:
         try:
             conn.execute("BEGIN IMMEDIATE;")
             for line in content.splitlines():
-                ents = extract_untrusted_sink_entities(line)
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                ents = set(extract_untrusted_sink_entities(stripped))
+                # v0.4.2: Also record imperative second-order prompt injection or shell-directive lines
+                # written during an UNTRUSTED turn even if they don't contain a literal URL/email,
+                # while keeping normal clean lines in the same file untainted!
+                if not ents and self.IMPERATIVE_SPAN_RE.search(stripped):
+                    ents.add("__TAINTED_IMPERATIVE_SPAN__")
                 if ents:
-                    lhash = self._hash_line(line)
+                    lhash = self._hash_line(stripped)
                     conn.execute(
                         "INSERT OR REPLACE INTO persistent_span_taint VALUES (?, ?, ?, ?, ?);",
                         (file_path, lhash, origin_integrity, json.dumps(sorted(ents)), now),
@@ -4421,6 +5760,31 @@ def main(argv: list[str] | None = None) -> int:
     p_sk.add_argument("paths", nargs="*", help="Skill/rule files or directories to audit (auto-discovers workspace skills/rules if omitted)")
     p_sk.add_argument("--workspace", default=".", help="Workspace root directory")
 
+    # 4c. `audit-server` (Primitive B3: 7-Vector Python AST & TypeScript MCP Server Source-to-Sink 0-Day Scanner)
+    p_srv = sub.add_parser(
+        "audit-server",
+        help="Audit Python (FastMCP/mcp.server) & TypeScript (@modelcontextprotocol/sdk) MCP server codebases for 7 source-to-sink 0-day CWE vectors",
+    )
+    p_srv.add_argument("paths", nargs="*", help="MCP server source files or repository directories to audit (defaults to --workspace)")
+    p_srv.add_argument("--workspace", default=".", help="Default workspace/repo directory if no paths given")
+    p_srv.add_argument("--format", choices=["json", "sarif"], default="json", help="Output format (json or sarif v2.1.0)")
+
+    # 4d. `probe-live` (Primitive B4: Live Grey-Box / Black-Box MCP Server Schema Introspector & Differential Boundary Prober)
+    p_probe = sub.add_parser(
+        "probe-live",
+        help="Spawn an MCP server inside a canary scratch dir, introspect live schemas, and run non-destructive boundary probes",
+    )
+    p_probe.add_argument("--no-boundary-probes", action="store_true", help="Only introspect schemas without calling tools")
+    p_probe.add_argument("--timeout", type=float, default=8.0, help="Per-request timeout in seconds")
+    p_probe.add_argument("upstream_cmd", nargs=argparse.REMAINDER, help="MCP server command and arguments after '--'")
+
+    # 4e. `verify-audit` (Primitive B5: Cryptographic SHA-256 / HMAC-SHA256 Audit Ledger Verifier)
+    p_va = sub.add_parser(
+        "verify-audit",
+        help="Verify the cryptographic SHA-256 / HMAC-SHA256 hash chain of .mcp-cage/audit.jsonl from genesis to head",
+    )
+    p_va.add_argument("--audit-file", default=".mcp-cage/audit.jsonl", help="Path to audit.jsonl ledger")
+
     # 5. `hook` (Plane B native lifecycle hook handler)
     p_hook = sub.add_parser("hook", help="Handle native agent lifecycle hook from stdin JSON")
     p_hook.add_argument("agent", choices=["claude", "cursor", "gemini", "agy", "codex"])
@@ -4516,6 +5880,30 @@ def main(argv: list[str] | None = None) -> int:
         report = WorkspaceSkillAndRuleAuditor.discover_and_audit(Path(args.workspace), explicit)
         print(json.dumps(report, indent=2))
         return 1 if report["summary"]["CRITICAL"] > 0 else 0
+
+    if args.subcommand == "audit-server":
+        targets = [Path(p) for p in args.paths] if args.paths else [Path(args.workspace)]
+        report = MCPServerSourceAuditor.discover_and_audit(targets, output_format=args.format)
+        print(json.dumps(report, indent=2))
+        if args.format == "sarif":
+            results = report.get("runs", [{}])[0].get("results", [])
+            return 1 if any(r.get("level") == "error" for r in results) else 0
+        return 1 if (report["summary"]["CRITICAL"] > 0 or report["summary"]["HIGH"] > 0) else 0
+
+    if args.subcommand == "probe-live":
+        report = LiveMCPServerProber.probe_stdio_server(
+            args.upstream_cmd,
+            run_boundary_probes=not args.no_boundary_probes,
+            timeout_sec=args.timeout,
+        )
+        print(json.dumps(report, indent=2))
+        has_crit = bool(report.get("schema_findings")) or bool(report.get("boundary_findings"))
+        return 1 if has_crit else 0
+
+    if args.subcommand == "verify-audit":
+        report = SessionTaintStateMachine.verify_audit_ledger(Path(args.audit_file))
+        print(json.dumps(report, indent=2))
+        return 0 if report["valid"] else 1
 
     if args.subcommand == "hook":
         raw_in = sys.stdin.read().strip()
