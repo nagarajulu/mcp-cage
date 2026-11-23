@@ -1679,6 +1679,8 @@ class SessionTaintStateMachine:
         self.session_id = session_id
         self.mode = mode
         self.audit_log_path = audit_log_path or (db_path.parent / "audit.jsonl")
+        self._last_audit_hash: str | None = None
+        self._last_audit_seq: int = 0
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -2328,13 +2330,22 @@ class SessionTaintStateMachine:
 
         prev_hash = "0" * 64
         seq = 1
-        if self.audit_log_path.exists():
+        if self._last_audit_hash is not None and self.audit_log_path.exists():
+            prev_hash = self._last_audit_hash
+            seq = self._last_audit_seq + 1
+        elif self.audit_log_path.exists():
             try:
-                lines = [ln.strip() for ln in self.audit_log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-                if lines:
-                    last_rec = json.loads(lines[-1])
-                    prev_hash = str(last_rec.get("entry_hash") or ("0" * 64))
-                    seq = int(last_rec.get("seq") or len(lines)) + 1
+                with open(self.audit_log_path, "rb") as rf:
+                    rf.seek(0, os.SEEK_END)
+                    fsize = rf.tell()
+                    if fsize > 0:
+                        read_len = min(fsize, 4096)
+                        rf.seek(fsize - read_len)
+                        tail_lines = [ln.strip() for ln in rf.read().decode("utf-8", errors="ignore").splitlines() if ln.strip()]
+                        if tail_lines:
+                            last_rec = json.loads(tail_lines[-1])
+                            prev_hash = str(last_rec.get("entry_hash") or ("0" * 64))
+                            seq = int(last_rec.get("seq") or 1) + 1
             except Exception:
                 pass
 
@@ -2365,6 +2376,8 @@ class SessionTaintStateMachine:
             entry_hash = hashlib.sha256(f"{prev_hash}:{canonical_core}".encode("utf-8")).hexdigest()
 
         record = {**record_core, "entry_hash": entry_hash}
+        self._last_audit_hash = entry_hash
+        self._last_audit_seq = seq
         with open(self.audit_log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
         return evaluation
