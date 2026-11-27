@@ -5,6 +5,39 @@ All notable changes to `mcp-cage` are documented in this file.
 
 ---
 
+## [0.4.3] — 2026-11-26
+
+### Added — 13 Competitive & First-in-Industry Capabilities: Child `SubprocessEnvJail`, Damerau-Levenshtein Slopsquatting Guard, Multi-Encoding Shingle DLP, Temporal Flow Rules & `learn-policy`, Honeytoken Canary Tripwires, HTTP/OAuth 2.1 Transport Firewall, Forensic Causal Trace Inspector (`inspect-audit`), Persistent Memory Quarantine, Scalar Return-Value Trojan Verifier, Transactional Workspace Rollback (`rollback`), Automated 0-Day Virtual Patch Compiler (`--auto-patch`), Polyglot Magic-Byte Guard & Zero-LLM Prompt-Intent Alignment Envelope
+1. **Zero-Leak Child Environment Jail (`SubprocessEnvJail`) & Offline Damerau-Levenshtein Supply-Chain Slopsquatting / Unpinned `npx -y` Guard (`WorkspaceMCPConfigAuditor`)**
+   - `mcp-cage wrap` now scrubs ambient credentials (`AWS_*`, `OPENAI_*`, `ANTHROPIC_*`, `GITHUB_*`, `*_KEY`, `*_TOKEN`, `*_SECRET`, `DATABASE_URL`) from child MCP server `os.environ` by default (`--allow-env` opt-in), preventing third-party MCP servers from harvesting shell environment secrets (`CWE-200` / `CWE-526`).
+   - `mcp-cage audit-config` computes exact Damerau-Levenshtein edit distance ($1 \le d_{\text{DL}} \le 2$) against canonical `@modelcontextprotocol/*` and ecosystem MCP packages to detect typosquatted/slopsquatted packages (`MCP_SUPPLY_CHAIN_TYPOSQUAT`, `CWE-829`) and unpinned dynamic runners (`UNPINNED_DYNAMIC_PACKAGE_EXEC`, `CWE-1357`).
+2. **Content-Addressed Rolling Shingle & Multi-Encoding De-Obfuscation DLP (`record_confidential_content_fingerprints` + `check_outbound_encoded_confidential_exfil`)**
+   - Fingerprints 24-character rolling SHA-256 shingles of `CONFIDENTIAL`/`SECRET` reads into SQLite WAL (`confidential_content_fingerprints`) and inspects outbound arguments across raw, URL-decoded, Base64, Base64URL, Base32, Hex, Reversed (`[::-1]`), and ROT13 views (`CWE-200` / `LLM02`).
+3. **Declarative Temporal Call-Graph Invariants (`temporal_rules`, `argument_policies`) & Automated Least-Privilege Policy Learner (`mcp-cage learn-policy`)**
+   - Enforces `require_prior`, `forbid_after`, and `max_calls` session call-graph invariants plus per-argument regex/range policies in `.mcp-cage/policy.json`, and synthesizes zero-false-positive least-privilege policies directly from `--mode shadow` `audit.jsonl` ledgers.
+4. **Active Cryptographic Honeytoken / Canary Decoy Tripwire System (`mcp-cage plant-canaries` / `check_honeytoken_tripwire`)**
+   - Mints deterministic HMAC-tagged canary credentials (`OPENAI_CANARY`, `ANTHROPIC_CANARY`, `AWS_CANARY`) in `canary_tripwires`; if any canary (raw or Base64/Hex/reversed) touches the wire, triggers an immediate session lockdown and revokes all active leases.
+5. **Streamable HTTP / SSE Transport Firewall & OAuth 2.1 Token-Binding Proxy (`MCPHttpTransportFirewall`)**
+   - Blocks local HTTP/SSE DNS Rebinding (`CVE-2025-66416`, `CWE-346`) via strict `Host` and `Origin` header validation, blocks malicious OAuth 2.1 `.well-known/oauth-authorization-server` endpoint command injection and SSRF (`CVE-2025-6514`), and strips `Authorization` / `Cookie` / `Mcp-Session-Id` headers across cross-origin HTTP redirects (`CWE-918` / `CWE-863`).
+6. **Offline Forensic Causal Trace & Attack-Graph Inspector (`ForensicAuditInspector` / `mcp-cage inspect-audit [--format markdown|mermaid|html|sarif]`)**
+   - Verifies the SHA-256 audit hash chain and compiles zero-dependency Mermaid `flowchart TD` causal attack graphs, standalone offline HTML forensic dashboards, Markdown executive reports, and SARIF v2.1.0 runtime incident logs.
+7. **Persistent Memory / Knowledge-Graph / RAG & A2A Context Poisoning Quarantine (`mcp-memory://` in `PersistentLineSpanProvenance`)**
+   - Extends content-addressed SHA-256 line-span provenance to MCP Memory / RAG servers (`create_entities`, `add_observations`, `save_memory`, `search_nodes`, `open_nodes`) and A2A handoffs, stopping second-order knowledge-graph poisoning across sessions.
+8. **Semantic Output Contract & Return-Value Trojan Verifier (`WirePayloadSanitizer.verify_and_sanitize_output_contract`)**
+   - Defeats "Post-Pinning Server Turncoat" attacks where a pinned MCP server injects imperative prompt-override trojans inside scalar return fields (`id`, `timestamp`, `status`, `version`, `count`, `sha256`).
+9. **Transactional Filesystem Snapshot & Automatic Taint-Induced Rollback Journal (`workspace_undo_journal` / `mcp-cage rollback`)**
+   - Records zlib-compressed content-addressed pre-image snapshots in SQLite WAL before agent file writes/edits and deterministically rolls back tainted file mutations in `<5ms`.
+10. **Automated 0-Day Discovery $\rightarrow$ Live Wire Virtual Patch Compiler (`mcp-cage audit-server --auto-patch .mcp-cage/policy.json`)**
+    - Automatically compiles static AST 0-day findings from `MCPServerSourceAuditor` into live per-tool, per-parameter wire virtual patches (`argument_policies` + `virtual_patches`).
+11. **Polyglot / Magic-Byte File Smuggling & Active SVG Payload Guard (`StandardArgGuards.polyglot_and_magic_byte_guard`)**
+    - Blocks executable binary headers (ELF `\x7fELF`, Mach-O, Windows PE `MZ`, Java class, ZIP/JAR `PK\x03\x04`) and interpreter shebangs disguised inside `.txt`/`.md`/`.json`/`.png` files (`CWE-434` / `CWE-436`), as well as active `<script>`, `onload=`, and `<!ENTITY>` payloads inside `.svg` files (`CWE-79`).
+12. **Zero-LLM Prompt-Intent vs. Tool-Action Lexical Alignment Envelope (`record_user_prompt_intent` + `check_prompt_intent_alignment`)**
+    - Extracts a `<0.1ms` read-only vs. mutation/egress capability envelope from the user's prompt at `UserPromptSubmit`, tripping `[ZERO-LLM INTENT-DRIFT CIRCUIT BREAKER]` if a read-only prompt attempts unrequested high-impact destructive or external-egress actions.
+13. **Cross-Server Impersonation & Fake Protocol-Frame Spoofing Guard (`WirePayloadSanitizer.CROSS_SERVER_SPOOF_RE`)**
+    - Strips spoofed `[SYSTEM ERROR from <other_server>]` and fake inline `{"jsonrpc": "2.0", "method": "tools/call"}` directives from untrusted tool responses (`CWE-290` / `CWE-345`).
+
+---
+
 ## [0.4.2] — 2026-11-22
 
 ### Added — 7-Vector MCP Server Source-to-Sink 0-Day Scanner (`audit-server`), Live Differential Boundary Prober (`probe-live`), Inbound Response & Reverse-Channel Firewall, Cross-Turn Salami-Slice Circuit Breaker & SHA-256 Hash-Chained Audit Ledger

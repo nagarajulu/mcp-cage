@@ -9,10 +9,13 @@
 from __future__ import annotations
 
 from mcp_cage.core import (
+    AutomatedPolicyAndPatchCompiler,
     ConfigAuditFinding,
+    ForensicAuditInspector,
     InFlightRequest,
     LiveMCPServerProber,
     MCPCageEngine,
+    MCPHttpTransportFirewall,
     MCPServerSourceAuditor,
     MCPWireGateway,
     SchemaToKernelSandboxCompiler,
@@ -24,10 +27,13 @@ from mcp_cage.core import (
 )
 
 __all__ = [
+    "AutomatedPolicyAndPatchCompiler",
     "ConfigAuditFinding",
+    "ForensicAuditInspector",
     "InFlightRequest",
     "LiveMCPServerProber",
     "MCPCageEngine",
+    "MCPHttpTransportFirewall",
     "MCPServerSourceAuditor",
     "MCPWireGateway",
     "SchemaToKernelSandboxCompiler",

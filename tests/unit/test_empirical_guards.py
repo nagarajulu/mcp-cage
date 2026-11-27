@@ -93,7 +93,7 @@ class TestMCPCageV30EmpiricalGuards(unittest.TestCase):
         )
 
     def test_version_is_current(self) -> None:
-        self.assertIn(__version__, ("0.3.0", "0.4.0", "0.4.1", "0.4.2"))
+        self.assertIn(__version__, ("0.3.0", "0.4.0", "0.4.1", "0.4.2", "0.4.3"))
 
     # -------------------------------------------------------------------------
     # 1. Runtime Endpoint & Session Re-pointing (`GHSA-rvjm-7hvp-f868`)

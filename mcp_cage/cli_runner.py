@@ -41,6 +41,7 @@ from mcp_cage.core import (
     ToolRole,
     ToolSecurityProfile,
     ToxicFlowGraphAnalyzer,
+    WorkspaceMCPConfigAuditor,
     filesystem_read_taint_resolver,
     github_issue_taint_resolver,
 )
@@ -272,6 +273,13 @@ def run_stdio_wrapper(args: argparse.Namespace) -> int:
         sys.stderr.write("Error: Missing upstream MCP server command after '--'.\n")
         return 2
 
+    # v0.4.3 Zero-Leak Child Process Environment Jail (`SubprocessEnvJail`)
+    raw_allow_env = getattr(args, "allow_env", "") or ""
+    allowed_env_keys = [k.strip() for k in raw_allow_env.split(",") if k.strip()]
+    scrubbed_child_env, _ = WorkspaceMCPConfigAuditor.build_scrubbed_child_env(
+        os.environ, allowed_env_keys=allowed_env_keys
+    )
+
     proc = subprocess.Popen(
         upstream_cmd,
         stdin=subprocess.PIPE,
@@ -280,6 +288,7 @@ def run_stdio_wrapper(args: argparse.Namespace) -> int:
         text=True,
         bufsize=1,
         start_new_session=True,
+        env=scrubbed_child_env,
     )
 
     def _cleanup_child(*_a: Any) -> None:
