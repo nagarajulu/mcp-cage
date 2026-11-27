@@ -4710,10 +4710,22 @@ class MCPServerSourceAuditor:
 
             func_src = _ast.get_source_segment(source, node) or ""
             has_func_level_path_guard = bool(
-                re.search(r"\b(relative_to|commonpath|is_safe_workspace_path|realpath)\b", func_src)
+                re.search(
+                    r"\b(relative_to|commonpath|is_safe_workspace_path|realpath|path_validator|validate_write|validate_read|assert_within_directory|resolve_ad_image_save_path|_resolve_target|mkdtemp)\b",
+                    func_src,
+                )
             )
             has_func_level_ssrf_guard = bool(
-                re.search(r"\b(validate_outbound_network_target|is_private|is_loopback|ip_address|allowed_domains|allowlist)\b", func_src)
+                re.search(
+                    r"\b(validate_outbound_network_target|is_private|is_loopback|ip_address|allowed_domains|allowlist|WebClient|_inline_web_client|_web_client|BlockedHostError|\.endswith\()\b",
+                    func_src,
+                )
+            )
+            has_func_level_sql_guard = bool(
+                re.search(
+                    r"\b(validate_identifier|_validate_table_name|_reject_mutation)\b",
+                    func_src,
+                )
             )
 
             # Pass 1: Intra-procedural taint propagation across assignments
@@ -4830,7 +4842,7 @@ class MCPServerSourceAuditor:
                     continue
 
                 # Sink 3: Raw SQL String Interpolation (`CWE-89`)
-                if isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"execute", "executemany", "executescript"} and sub.args:
+                if not has_func_level_sql_guard and isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"execute", "executemany", "executescript"} and sub.args:
                     sql_hit = cls._is_interpolated_sql_node(sub.args[0], tainted_vars, interpolated_sql_vars, _ast)
                     if sql_hit:
                         root_sql_param = var_origin.get(sql_hit.split("[")[0].split(".")[0], sql_hit)
@@ -4883,9 +4895,16 @@ class MCPServerSourceAuditor:
                     continue
 
                 # Sink 5: Unvalidated SSRF / Cross-Origin Redirect Credential Leak (`CWE-918`)
+                http_client_prefixes = ("requests.", "httpx.", "urllib.request.", "aiohttp.", "client.", "session.", "http_client.")
                 is_http_sink = (
                     func_qname in {"requests.get", "requests.post", "requests.put", "requests.delete", "requests.request", "httpx.get", "httpx.post", "urllib.request.urlopen"}
-                    or (isinstance(sub.func, _ast.Attribute) and sub.func.attr in {"get", "post", "request", "urlopen"} and sub.args and any(k in tainted_hit.lower() for k in ("url", "uri", "endpoint", "target", "webhook", "host")))
+                    or (
+                        func_qname.startswith(http_client_prefixes)
+                        and isinstance(sub.func, _ast.Attribute)
+                        and sub.func.attr in {"get", "post", "put", "delete", "request", "urlopen"}
+                        and sub.args
+                        and cls._ast_node_uses_tainted(sub.args[0], tainted_vars, _ast) is not None
+                    )
                 )
                 if is_http_sink and not has_func_level_ssrf_guard:
                     cwe, _, rem = cls.RULE_METADATA["MCP_SINK_UNVALIDATED_SSRF"]
